@@ -7,6 +7,7 @@ import re
 
 import sympy as sp
 
+from ..reasoning import numeric
 from .parser import ParseError, normalize_text, parse_expr, parse_relation, parse_system
 
 X = sp.Symbol("x")
@@ -69,9 +70,14 @@ def _solve(relations):
     pods = [("Input", "; ".join(f"{fmt(e.lhs)} = {fmt(e.rhs)}" for e in eqs))]
     if len(eqs) == 1 and len(syms) > 1:
         syms = [_pick_var(eqs[0])]
-    sols = sp.solve(eqs, syms, dict=True)
+    try:
+        sols = sp.solve(eqs, syms, dict=True)
+    except NotImplementedError:
+        if len(eqs) == 1 and len(syms) == 1:
+            return pods + _numeric_scan(eqs[0].lhs - eqs[0].rhs, syms[0])
+        raise
     if not sols:
-        pods.append(("Solutions", "No solutions found"))
+        pods += _no_closed_form(eqs, syms)
         return pods
     lines = []
     for sol in sols:
@@ -82,7 +88,81 @@ def _solve(relations):
             line += "   (" + ", ".join(approx) + ")"
         lines.append(line)
     pods.append(("Solutions" if len(lines) > 1 else "Solution", "\n".join(lines)))
+    pods.append(_verify_solutions(eqs, sols))
     return pods
+
+
+def _no_closed_form(eqs, syms):
+    """solve() found nothing. Never claim 'no solutions' unless that is actually proved."""
+    if len(eqs) == 1 and len(syms) == 1:
+        var, residual = syms[0], eqs[0].lhs - eqs[0].rhs
+        try:
+            if sp.solveset(residual, var, domain=sp.S.Complexes) == sp.S.EmptySet:
+                return [("Solutions", "None: the equation has no solutions (proved).")]
+        except (NotImplementedError, ValueError, TypeError):
+            pass
+        if residual.is_polynomial(var):
+            roots = sp.Poly(residual, var).nroots(n=12)
+            lines = [f"{var} ≈ {_approx(r, 10)}" for r in roots]
+            ev = numeric.check_roots(residual, var, roots)
+            return [("Solutions (numerical)", "\n".join(lines)),
+                    ("Why numerical?", "No exact formula for these roots was found. Polynomials of degree 5 and "
+                                       "higher generally have no formula in radicals (Abel–Ruffini theorem), so "
+                                       "the roots are computed numerically."),
+                    ("Verification", ev.summary().replace("disagree", "residual not ~0") + ".")]
+    return [("Solutions", "No closed-form solution found. This does not mean there are none.")]
+
+
+SCAN = (-20, 20)
+
+
+def _numeric_scan(residual, var, steps=4000):
+    """Real roots in SCAN by sign changes + refinement. Honest about being incomplete."""
+    import numpy as np
+    f = sp.lambdify(var, residual, modules="mpmath")
+    xs = np.linspace(*SCAN, steps)
+    vals = []
+    for xv in xs:
+        try:
+            v = complex(f(float(xv)))
+            vals.append(v.real if abs(v.imag) < 1e-12 else float("nan"))
+        except (ValueError, ZeroDivisionError, OverflowError, TypeError):
+            vals.append(float("nan"))
+    roots = []
+    for a, b, fa, fb in zip(xs, xs[1:], vals, vals[1:]):
+        if fa == 0:
+            roots.append(sp.Float(a))
+        elif fa * fb < 0:
+            try:
+                r = sp.nsolve(residual, var, (float(a), float(b)), solver="bisect")
+            except (ValueError, ZeroDivisionError, TypeError):
+                continue
+            if abs(complex(residual.subs(var, r).evalf())) < 1e-8:      # a root, not a pole
+                roots.append(r)
+    if not roots:
+        return [("Solutions", f"No exact solution found, and no real roots in [{SCAN[0]}, {SCAN[1]}]. "
+                              f"There may still be solutions outside that range or complex ones.")]
+    lines = [f"{var} ≈ {_approx(r, 10)}" for r in roots]
+    return [("Solutions (numerical)", "\n".join(lines)),
+            ("Why numerical?", f"This equation mixes kinds of functions, so it has no closed-form solution "
+                               f"SymPy can find. Real roots were located numerically in [{SCAN[0]}, {SCAN[1]}] by "
+                               f"looking for sign changes; roots outside that range are not listed."),
+            _verification([numeric.check_roots(residual, var, roots)])]
+
+
+def _verification(evidence):
+    return ("Verification", "\n".join(e.summary() + "." for e in evidence))
+
+
+def _verify_solutions(eqs, sols):
+    """Substitute every solution back: exact zero is a proof, otherwise fall back to numerics."""
+    proved = all(sp.simplify((e.lhs - e.rhs).subs(sol)) == 0 for sol in sols for e in eqs)
+    if proved:
+        return ("Verification", "Proved: substituting each solution into the equation gives exactly 0.")
+    if len(eqs) == 1 and all(len(s) == 1 for s in sols):
+        var = next(iter(sols[0]))
+        return _verification([numeric.check_roots(eqs[0].lhs - eqs[0].rhs, var, [s[var] for s in sols])])
+    return ("Verification", "Could not confirm every solution by substitution.")
 
 
 def _expression_pods(expr, raw):
@@ -138,6 +218,11 @@ def compute(text):
         from .checker import check
         return check(text), None
 
+    from . import reasoning_commands
+    pods = reasoning_commands.match(text)
+    if pods is not None:
+        return pods, None
+
     m = _RE_SOLVE.match(text)
     if m:
         relations = parse_system(m.group(1))
@@ -162,6 +247,7 @@ def compute(text):
         pods = [("Input", f"d/d{var} [{fmt(expr)}]"), ("Derivative", fmt(sp.simplify(d)))]
         d2 = sp.simplify(sp.diff(d, var))
         pods.append(("Second derivative", fmt(d2)))
+        pods.append(_verification([numeric.check_derivative(expr, d, var)]))
         return pods, expr
 
     m = _RE_INT.match(text)
@@ -176,11 +262,14 @@ def compute(text):
                     ("Definite integral", fmt(val))]
             if _needs_approx(val):
                 pods.append(("Decimal approximation", _approx(val, 12)))
+            if not val.free_symbols:
+                pods.append(_verification([numeric.check_definite_integral(expr, var, a, b, val)]))
             return pods, expr
         val = sp.integrate(expr, var)
         if val.has(sp.Integral):
             return [("Input", f"∫ {fmt(expr)} d{var}"), ("Indefinite integral", "No closed form found")], expr
-        return [("Input", f"∫ {fmt(expr)} d{var}"), ("Indefinite integral", fmt(val) + " + C")], expr
+        return [("Input", f"∫ {fmt(expr)} d{var}"), ("Indefinite integral", fmt(val) + " + C"),
+                _verification([numeric.check_antiderivative(val, expr, var)])], expr
 
     m = _RE_LIMIT.match(text)
     if m:

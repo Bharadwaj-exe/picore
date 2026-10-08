@@ -30,7 +30,9 @@ class Evidence:
 
     def summary(self):
         if self.status == "passed":
-            return f"{self.method}: agreed at {self.tested} test points (numerical evidence, not a proof)"
+            where = getattr(self, "passed_note", "") or (
+                "agreed" if self.tested == 1 else f"agreed at {self.tested} test points")
+            return f"{self.method}: {where} (numerical evidence, not a proof)"
         if self.status == "failed":
             where = ", ".join(f"{k} = {v}" for k, v in self.counterexample.items()) or "a test point"
             a, b = (_short(v) for v in self.values)
@@ -139,4 +141,6 @@ def check_roots(residual, var, roots):
         tested += 1
         if abs(v) > 1e-9:
             return Evidence("failed", tested, method, {var: r}, (v, 0))
-    return Evidence("passed" if tested else "inconclusive", tested, method)
+    ev = Evidence("passed" if tested else "inconclusive", tested, method)
+    ev.passed_note = f"every one of the {tested} solutions gives ≈ 0"
+    return ev

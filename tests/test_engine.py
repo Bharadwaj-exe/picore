@@ -85,3 +85,48 @@ def test_plot_targets():
     assert plot_target("x^2 - 4") == x ** 2 - 4
     assert plot_target("2+2") is None
     assert plot_target("x + y") is None
+
+
+# ---- honesty: never claim "no solutions" without proof -------------------------
+
+def test_quintic_gets_numerical_roots_not_no_solutions():
+    r = evaluate("x^5 - x - 1 = 0")
+    pods = dict(r.pods)
+    assert "Solutions (numerical)" in pods and "1.167303978" in pods["Solutions (numerical)"]
+    assert "not a proof" in pods["Verification"]
+
+
+def test_no_solutions_only_when_proved():
+    assert "(proved)" in dict(evaluate("exp(x) = 0").pods)["Solutions"]
+    assert "(proved)" in dict(evaluate("x = x + 1").pods)["Solutions"]
+
+
+def test_transcendental_equation_scanned_numerically():
+    pods = dict(evaluate("sin(x) = x/2").pods)
+    assert "1.895494267" in pods["Solutions (numerical)"]
+    assert "not listed" in pods["Why numerical?"]
+
+
+def test_solutions_are_verified_by_substitution():
+    assert dict(evaluate("x^2 + x + 1 = 0").pods)["Verification"].startswith("Proved")
+
+
+def test_derivative_and_integrals_carry_numerical_verification():
+    assert "finite difference" in dict(evaluate("d/dx sin(x^2)").pods)["Verification"]
+    assert "quadrature" in dict(evaluate("integrate x^2 from 0 to 3").pods)["Verification"]
+    assert "antiderivative" in dict(evaluate("integral of x e^x").pods)["Verification"]
+
+
+# ---- reasoning commands -----------------------------------------------------------
+
+def test_equiv_command():
+    pods = dict(evaluate("equiv (x^2-1)/(x-1) ; x+1").pods)
+    assert pods["Verdict"] == "Equivalent, with a domain restriction (x ≠ 1)"
+    assert dict(evaluate("is (x+1)^2 = x^2+2x+1").pods)["Verdict"] == "Equivalent"
+    assert dict(evaluate("compare sqrt(x^2) with x").pods)["Verdict"] == "Not equivalent"
+
+
+def test_derive_command():
+    pods = evaluate("derive (x+1)^2 : expand, d/dx, sub x=1").pods
+    assert [t.split("·")[1].split("(")[1].rstrip(")") for t, _ in pods[1:]] == ["verified symbolically"] * 3
+    assert pods[-1][1].startswith("4")
