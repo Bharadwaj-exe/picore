@@ -24,6 +24,20 @@ python "Pi Core.py"
 | `limit sin(x)/x as x->0` | limits |
 | `factor …`, `expand …`, `simplify …` | that transformation |
 
+### Mistake detective
+
+Type your working as steps joined by `->`, and πCore finds the first wrong step:
+
+```
+check 2(x+3)=10 -> 2x+6=10 -> 2x=4 -> x=3     → step 4 is wrong (should be x = 2)
+check x^2=4 -> x=2                             → lost the solution x = -2
+check sqrt(x)=x-2 -> x=(x-2)^2                 → squaring added the extra root x = 1
+check (a+b)^2 -> a^2+b^2                       → not equal (shows a counterexample)
+```
+
+Equations are compared by their solution sets, and expressions symbolically (with a numeric
+counterexample when they differ). Final answers like `x=2 or x=3` are understood.
+
 Implicit multiplication (`2x`, `2(x+1)`, `sin x`) and symbols like `π √ ² ×` work.
 
 **GRAPH** (Ctrl+G) plots any one-variable expression: scroll to zoom, drag to pan, hover to trace, R to reset.

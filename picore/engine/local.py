@@ -119,6 +119,7 @@ def _expression_pods(expr, raw):
 
 
 # ---- command patterns -------------------------------------------------------
+_RE_CHECK = re.compile(r"^check\s+", re.I)
 _RE_SOLVE = re.compile(r"^solve\s+(.+?)(?:\s+for\s+([a-z]))?$", re.I)
 _RE_DDX = re.compile(r"^d/d([a-z])\s*(.+)$", re.I)
 _RE_DIFF = re.compile(r"^(?:diff|differentiate|derivative(?:\s+of)?)\s+(.+?)"
@@ -132,6 +133,10 @@ _RE_TRANSFORM = re.compile(r"^(factor|expand|simplify)\s+(.+)$", re.I)
 def compute(text):
     """Return (pods, plot_expr). Raises ParseError if the input isn't math."""
     text = normalize_text(text)
+
+    if _RE_CHECK.match(text):
+        from .checker import check
+        return check(text), None
 
     m = _RE_SOLVE.match(text)
     if m:

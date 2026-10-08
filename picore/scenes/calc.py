@@ -9,7 +9,8 @@ from .simple import Scene
 
 TIMEOUT_S = 25
 EXAMPLES = ["x^2 - 5x + 6", "solve x+y=3 and x-y=1", "d/dx sin(x)^2",
-            "integrate x^2 from 0 to 3", "limit sin(x)/x as x->0", "y = sin(x)/x"]
+            "integrate x^2 from 0 to 3", "limit sin(x)/x as x->0", "y = sin(x)/x",
+            "check x^2 = 4 -> x = 2"]
 
 
 class CalcScene(Scene):
@@ -55,6 +56,15 @@ class CalcScene(Scene):
         self.app.worker.submit("plot", plot_target, text)
         self.set_status("Preparing graph", T.LOADER)
 
+    def render_pod(self, pod, width):
+        """Mistake-detective steps get a green / red / grey border; everything else is gold."""
+        title, content = pod[0], pod[1]
+        border = T.YELLOW
+        if title.startswith("Step "):
+            border = T.GOOD if title.endswith("correct") else T.ERROR if title.endswith("mistake here") \
+                else T.MUTED if title.endswith("couldn't check") else T.YELLOW
+        return self.cards.render_card(title, content, width, border=border)
+
     def set_status(self, text, color=T.MUTED):
         self.status, self.status_color = text, color
 
@@ -63,7 +73,7 @@ class CalcScene(Scene):
             if error is not None:
                 result = engine.Response([("Error", f"Something went wrong: {error}")], "error")
             self.last = (self.pending_text, result)
-            self.cards.load(result.pods)
+            self.cards.load(result.pods, renderer=self.render_pod)
             if result.source == "local":
                 self.set_status("Solved offline with SymPy")
             elif result.source == "wolfram":
