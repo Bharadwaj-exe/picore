@@ -57,8 +57,12 @@ class LoadingScene(Scene):
             txt = T.font(24, True).render(msg, True, T.ERROR)
         else:
             word = self.WORDS[int(self.t // 1100) % len(self.WORDS)]
-            dots = "." * (int(self.t // 300) % 4)
-            txt = T.font(30, True).render(word + dots, True, T.LOADER)
+            txt = T.display(word, 34, T.LOADER)
+            rect = txt.get_rect(center=(T.WIDTH // 2, T.HEIGHT // 2))
+            for i in range(int(self.t // 300) % 4):      # animated dots, without moving the text
+                pygame.draw.circle(s, T.LOADER, (rect.right + 10 + i * 12, rect.bottom - 4), 3)
+            s.blit(txt, rect)
+            return
         s.blit(txt, txt.get_rect(center=(T.WIDTH // 2, T.HEIGHT // 2)))
 
 

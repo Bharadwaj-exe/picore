@@ -160,7 +160,7 @@ class CalcScene(Scene):
             self.draw_examples(s)
 
     def draw_examples(self, s):
-        title = T.font(22, True).render("Try one of these:", True, T.YELLOW)
+        title = T.display("Try one of these", 26, T.YELLOW)
         s.blit(title, (100, 250))
         x, y = 100, 292
         self.example_rects = []

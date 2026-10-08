@@ -64,3 +64,17 @@ def test_text_input_limit_and_recall():
     t.handle(key(pygame.K_DOWN))
     t.handle(key(pygame.K_DOWN))
     assert t.text == ""
+
+
+def test_text_font_falls_back_for_math_symbols():
+    from picore.ui import theme as T
+    f = T.font(20)
+    for sym in ("π", "√", "∫", "≈", "∞", "ε"):   # pi, sqrt, integral, approx, inf, epsilon
+        runs = f._runs(sym)
+        assert T._has_glyph(runs[0][0], sym), f"no font draws {sym!r}"
+
+
+def test_display_text_is_cropped_and_renders_punctuation():
+    from picore.ui import theme as T
+    surf = T.display("MUSIC: ON", 26, (0, 0, 0))
+    assert surf.get_width() > 50 and surf.get_bounding_rect().size == surf.get_size()

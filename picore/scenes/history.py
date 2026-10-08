@@ -8,6 +8,15 @@ from .simple import Scene
 CONFIRM_MS = 3000
 
 
+def fit(text, fnt, max_width):
+    """Shorten ``text`` with an ellipsis so it fits in ``max_width`` pixels."""
+    if fnt.size(text)[0] <= max_width:
+        return text
+    while text and fnt.size(text + "…")[0] > max_width:
+        text = text[:-1]
+    return text.rstrip() + "…"
+
+
 class HistoryScene(Scene):
     def __init__(self, app):
         super().__init__(app)
@@ -48,21 +57,18 @@ class HistoryScene(Scene):
                 body += [("line", ln) for ln in wrap_text(content, fb, width - 2 * pad - 20)]
         else:
             first = next((c for t, c in item.results if t != "Input"), "")
-            line = first.replace("\n", "  ")
-            while line and fb.size(line + "…")[0] > width - 2 * pad - 20:
-                line = line[:-1]
-            if line != first.replace("\n", "  "):
-                line += "…"
-            body = [("line", line)]
+            body = [("line", fit(first.replace("\n", "  "), fb, width - 2 * pad - 20))]
         lh = fb.get_linesize()
         h = pad + ft.get_linesize() + 8 + len(body) * lh + pad
         surf = pygame.Surface((width, h))
         surf.fill(T.BLACK)
         pygame.draw.rect(surf, T.YELLOW, surf.get_rect(), 3)
-        surf.blit(ft.render(item.expression, True, T.YELLOW), (pad, pad - 4))
         meta = fs.render(f"{item.created_at}   ·   {'Wolfram|Alpha' if item.source == 'wolfram' else 'SymPy'}"
                          f"   ·   {'click to collapse' if is_open else 'click to expand'}", True, T.MUTED)
-        surf.blit(meta, (width - meta.get_width() - pad - 110, pad))
+        meta_x = width - meta.get_width() - pad - 110
+        title = fit(item.expression, ft, meta_x - pad - 24)   # never run into the date
+        surf.blit(ft.render(title, True, T.YELLOW), (pad, pad - 4))
+        surf.blit(meta, (meta_x, pad))
         # RUN chip (hit-tested in handle via the same geometry)
         run = pygame.Rect(width - pad - 90, pad - 4, 90, 30)
         pygame.draw.rect(surf, T.YELLOW, run)
@@ -114,7 +120,7 @@ class HistoryScene(Scene):
         self.clear_btn.font_size = 20 if confirming else 26
         if self.items:
             self.clear_btn.draw(s)
-        title = T.font(34, True).render("History", True, T.YELLOW)
+        title = T.display("History", 40, T.YELLOW)
         s.blit(title, title.get_rect(center=(T.WIDTH // 2, 50)))
         if self.error:
             msg = T.font(22, True).render(self.error, True, T.ERROR)

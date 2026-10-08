@@ -15,6 +15,11 @@ python -m PyInstaller packaging\picore.spec --noconfirm --log-level WARN
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
 
 if (Get-ChildItem dist\PiCore -Recurse -Filter picore.config.json) { throw "API key file leaked into the build" }
+foreach ($f in Get-ChildItem assets\fonts -Filter *.tt?) {
+    if ($f.Name -ne "ShotengaiDemo.otf" -and -not (Test-Path "dist\PiCore\_internal\assets\fonts\$($f.Name)")) {
+        throw "Font missing from build: $($f.Name) (add it to FONTS in picore.spec)"
+    }
+}
 
 $report = Join-Path $env:TEMP "picore-selftest.json"
 Remove-Item $report -ErrorAction SilentlyContinue

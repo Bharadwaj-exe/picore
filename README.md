@@ -63,7 +63,7 @@ small server you control so the key is not shipped inside the app.
 
 ```bash
 pip install pyinstaller
-powershell -ExecutionPolicy Bypass -File packaginguild.ps1
+powershell -ExecutionPolicy Bypass -File packaging/build.ps1
 ```
 
 This runs the tests, builds `dist\PiCore\PiCore.exe`, checks that no API key file got bundled,
@@ -106,3 +106,15 @@ proxy/                Cloudflare Worker that hides the Wolfram AppID
 pip install -r requirements-dev.txt
 python -m pytest
 ```
+
+## Fonts
+
+| Use | Font | Licence |
+|---|---|---|
+| Titles and buttons | Shotengai Demo (if present), otherwise Yuji Syuku | Shotengai: personal use only. Yuji Syuku: SIL OFL |
+| Text and results | Shippori Mincho | SIL OFL |
+| Greek letters and maths symbols | STIX Two Math | SIL OFL |
+
+The OFL fonts are subset to the characters the app uses, and their licences are in `assets/fonts/`.
+`ShotengaiDemo.otf` is git-ignored and left out of builds by default. Set `PICORE_PERSONAL_BUILD=1`
+to include it in a build for your own machine; buy the full licence before distributing it.

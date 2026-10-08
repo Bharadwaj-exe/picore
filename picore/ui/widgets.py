@@ -45,7 +45,7 @@ class Button:
         pygame.draw.rect(s, T.BLACK, self.rect.move(sh))
         pygame.draw.rect(s, T.YELLOW, self.rect.move(off))
         pygame.draw.rect(s, T.BLACK, self.rect.move(off), 3)
-        t = T.font(self.font_size, True).render(self.text, True, T.BLACK)
+        t = T.display(self.text, self.font_size, T.BLACK)
         s.blit(t, t.get_rect(center=self.rect.move(off).center))
 
     def clicked(self, e):

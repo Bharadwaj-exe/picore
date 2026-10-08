@@ -8,3 +8,6 @@ dist/
 # local secrets / settings
 picore.config.json
 .picore_bootstrapped
+
+# personal-use-only demo font: never commit or ship publicly
+assets/fonts/ShotengaiDemo.otf
