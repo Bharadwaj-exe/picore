@@ -8,17 +8,20 @@ from ..ui.widgets import Button, CardList, TextInput
 from .simple import Scene
 
 TIMEOUT_S = 25
-EXAMPLES = ["x^2 - 5x + 6", "solve x+y=3 and x-y=1", "d/dx sin(x)^2",
-            "integrate x^2 from 0 to 3", "limit sin(x)/x as x->0", "y = sin(x)/x",
-            "check x^2 = 4 -> x = 2"]
+EXAMPLES = ["x^2 - 5x + 6", "solve x+y=3 and x-y=1", "d/dx sin(x)^2", "integrate x^2 from 0 to 3",
+            "check x^2-5x+6=0 -> x^2 = 5x-6 -> x = 5 ± √6", "check d/dx(x^2 sin(x)) -> 2x cos(x)",
+            "equiv (x^2-1)/(x-1) ; x+1", "derive (x+1)^2 : expand, d/dx, sub x=1",
+            "tree 2sin(x)^2 + 3x", "explore a x^2 + b x + c"]
 
 
 class CalcScene(Scene):
     def __init__(self, app):
         super().__init__(app)
         self.back_btn = Button("BACK", (90, 50), (120, 44), 30)
-        self.graph_btn = Button("GRAPH", (1120, 88), (160, 48), 30)
-        self.history_btn = Button("HISTORY", (1120, 152), (160, 48), 30)
+        self.graph_btn = Button("GRAPH", (1072, 88), (122, 48), 26)
+        self.tree_btn = Button("TREE", (1204, 88), (122, 48), 26)
+        self.history_btn = Button("HISTORY", (1072, 152), (122, 48), 26)
+        self.explore_btn = Button("EXPLORE", (1204, 152), (122, 48), 26)
         self.input = TextInput((190, 62, 800, 110))
         self.cards = CardList((80, 225, 1110, 410))
         self.status = ""
@@ -40,6 +43,10 @@ class CalcScene(Scene):
         text = self.input.text.strip()
         if not text:
             return
+        word, _, rest = text.partition(" ")
+        if word.lower() in ("tree", "explore") and rest.strip():     # screens, not calculations
+            self.app.go(word.lower(), text=rest)
+            return
         self.pending_text = text
         self.app.worker.submit("calc", engine.evaluate, text, self.app.settings.wolfram_app_id,
                                self.app.settings.wolfram_proxy)
@@ -57,13 +64,37 @@ class CalcScene(Scene):
         self.app.worker.submit("plot", plot_target, text)
         self.set_status("Preparing graph", T.LOADER)
 
+    def open_screen(self, name):
+        """TREE / EXPLORE use what's in the input box (minus any command word)."""
+        text = self.input.text.strip()
+        word, _, rest = text.partition(" ")
+        if word.lower() in ("tree", "explore", "check", "equiv", "derive"):
+            text = rest
+        if not text:
+            example = "2sin(x)^2 + 3x" if name == "tree" else "a x^2 + b x + c"
+            self.set_status(f"Type an expression first, e.g. {example}", T.ERROR)
+            return
+        self.app.go(name, text=text)
+
     def render_pod(self, pod, width):
-        """Mistake-detective steps get a green / red / grey border; everything else is gold."""
+        """Border colour shows the verdict: green proved/correct, amber evidence-only or needs care,
+        red wrong, grey undecided. Everything else is gold."""
         title, content = pod[0], pod[1]
         border = T.YELLOW
-        if title.startswith("Step "):
-            border = T.GOOD if title.endswith("correct") else T.ERROR if title.endswith("mistake here") \
-                else T.MUTED if title.endswith("couldn't check") else T.YELLOW
+        t = title.lower()
+        if t.endswith("mistake here") or "does not follow" in t or title == "Error":
+            border = T.ERROR
+        elif t.endswith("check needed") or "checked numerically" in t:
+            border = T.WARN
+        elif t.endswith("couldn't check") or "could not be verified" in t:
+            border = T.MUTED
+        elif t.endswith("correct") or "verified symbolically" in t:
+            border = T.GOOD
+        elif title == "Verification":
+            border = T.GOOD if content.startswith("Proved") else T.WARN if "not a proof" in content else T.ERROR
+        elif title == "Verdict" and pod[1].startswith(("Equivalent", "Probably", "Not", "Unable")):
+            border = T.GOOD if pod[1] == "Equivalent" or pod[1].startswith("Equivalent,") else \
+                T.WARN if pod[1].startswith("Probably") else T.ERROR if pod[1].startswith("Not") else T.MUTED
         return self.cards.render_card(title, content, width, border=border)
 
     def set_status(self, text, color=T.MUTED):
@@ -114,7 +145,13 @@ class CalcScene(Scene):
         if self.history_btn.clicked(e):
             self.app.go("history")
             return
+        if self.tree_btn.clicked(e) or self.explore_btn.clicked(e):
+            self.open_screen("tree" if self.tree_btn.clicked(e) else "explore")
+            return
         if e.type == pygame.KEYDOWN and e.mod & pygame.KMOD_CTRL:
+            if e.key in (pygame.K_t, pygame.K_e):
+                self.open_screen("tree" if e.key == pygame.K_t else "explore")
+                return
             if e.key == pygame.K_g:
                 self.open_graph()
                 return
@@ -143,8 +180,8 @@ class CalcScene(Scene):
     def draw(self, s):
         s.blit(self.app.bg_game, (0, 0))
         self.back_btn.draw(s)
-        self.graph_btn.draw(s)
-        self.history_btn.draw(s)
+        for b in (self.graph_btn, self.tree_btn, self.history_btn, self.explore_btn):
+            b.draw(s)
         self.input.draw(s)
 
         status = self.status
@@ -179,6 +216,6 @@ class CalcScene(Scene):
             s.blit(t, t.get_rect(center=r.center))
             self.example_rects.append((r, ex))
             x = r.right + 18
-        hint = T.font(17).render("Enter: solve   ·   ↑/↓: previous inputs   ·   Ctrl+G: graph   ·   "
-                                 "Ctrl+H: history   ·   Esc: clear", True, T.MUTED)
-        s.blit(hint, (100, y + 70))
+        hint = T.font(17).render("Enter: solve   ·   ↑/↓: previous inputs   ·   Ctrl+G graph   ·   Ctrl+T tree   ·   "
+                                 "Ctrl+E explore   ·   Ctrl+H history   ·   Esc: clear", True, T.MUTED)
+        s.blit(hint, (100, y + 64))

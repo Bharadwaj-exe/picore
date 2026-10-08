@@ -13,6 +13,8 @@ from picore.ui.widgets import TextInput, wrap_text  # noqa: E402
 def _pg():
     pygame.font.init()
     yield
+    from picore.ui import theme
+    theme.reset()
     pygame.font.quit()
 
 

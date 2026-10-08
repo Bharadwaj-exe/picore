@@ -68,8 +68,11 @@ class App:
         from .scenes.graph import GraphScene
         from .scenes.history import HistoryScene
         from .scenes.simple import LoadingScene, MenuScene
+        from .scenes.explore import ExplorerScene
+        from .scenes.tree import TreeScene
         self.scenes = {"loading": LoadingScene(self), "menu": MenuScene(self), "calc": CalcScene(self),
-                       "history": HistoryScene(self), "graph": GraphScene(self)}
+                       "history": HistoryScene(self), "graph": GraphScene(self), "tree": TreeScene(self),
+                       "explore": ExplorerScene(self)}
         self.scene = None
         self.go("loading")
 
@@ -108,6 +111,7 @@ class App:
                 self.music_btn.text = "MUSIC: ON" if self.music.on else "MUSIC: OFF"
                 self.music_btn.draw(self.screen)
             pygame.display.flip()
+        T.reset()
         pygame.quit()
 
 

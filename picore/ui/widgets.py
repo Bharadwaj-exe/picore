@@ -264,3 +264,50 @@ class CardList:
                 -self.scroll / (self.content_height - self.area.height)
             bar = pygame.Rect(self.area.right + 8, self.area.y + int(span * pos), 6, bar_h)
             pygame.draw.rect(s, T.YELLOW, bar)
+
+
+class Slider:
+    """Horizontal slider for one parameter. ``handle`` returns True when the value changed."""
+
+    def __init__(self, label, rect, lo=-10.0, hi=10.0, value=1.0, step=0.1):
+        self.label, self.rect = label, pygame.Rect(rect)
+        self.lo, self.hi, self.step = lo, hi, step
+        self.value = value
+        self.dragging = False
+
+    def _set_from_x(self, px):
+        frac = min(1.0, max(0.0, (px - self.rect.left) / self.rect.width))
+        return self._set(self.lo + frac * (self.hi - self.lo))
+
+    def _set(self, v):
+        v = round(round(v / self.step) * self.step, 6)
+        v = min(self.hi, max(self.lo, v))
+        changed = v != self.value
+        self.value = v
+        return changed
+
+    def handle(self, e):
+        hit = self.rect.inflate(16, 24)
+        if e.type == pygame.MOUSEBUTTONDOWN and e.button == 1 and hit.collidepoint(e.pos):
+            self.dragging = True
+            return self._set_from_x(e.pos[0])
+        if e.type == pygame.MOUSEBUTTONUP and e.button == 1:
+            self.dragging = False
+        if e.type == pygame.MOUSEMOTION and self.dragging:
+            return self._set_from_x(e.pos[0])
+        if e.type == pygame.MOUSEWHEEL and hit.collidepoint(pygame.mouse.get_pos()):
+            return self._set(self.value + e.y * self.step)
+        return False
+
+    def draw(self, s):
+        r = self.rect
+        label = T.font(20, True).render(f"{self.label} = {self.value:g}", True, T.YELLOW)
+        s.blit(label, (r.x, r.y - 30))
+        pygame.draw.rect(s, (60, 60, 60), r, border_radius=4)
+        zero = r.x + (0 - self.lo) / (self.hi - self.lo) * r.w
+        knob = r.x + (self.value - self.lo) / (self.hi - self.lo) * r.w
+        fill = pygame.Rect(min(zero, knob), r.y, abs(knob - zero), r.h)
+        pygame.draw.rect(s, T.GOLD, fill)
+        pygame.draw.line(s, T.MUTED, (zero, r.y - 4), (zero, r.bottom + 4), 1)
+        pygame.draw.circle(s, T.YELLOW, (int(knob), r.centery), 11)
+        pygame.draw.circle(s, T.BLACK, (int(knob), r.centery), 11, 2)

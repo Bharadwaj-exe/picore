@@ -18,6 +18,7 @@ PLACEHOLDER = (120, 120, 120)
 LOADER = (180, 140, 255)
 ERROR = (255, 110, 110)
 GOOD = (110, 220, 130)
+WARN = (255, 170, 60)
 GRAPH_BG = (14, 14, 14)
 GRID = (45, 45, 45)
 
@@ -32,6 +33,15 @@ SYSTEM_FALLBACK = "segoeui,arial,helvetica,dejavusans"
 _cache = {}
 _display_path = None
 _has = {}   # (font id, char) -> whether that font draws a real glyph for char
+
+
+def reset():
+    """Forget cached fonts. Must be called when pygame shuts down: a Font used after
+    pygame.quit() crashes the interpreter (access violation), not with a Python error."""
+    global _display_path
+    _cache.clear()
+    _has.clear()
+    _display_path = None
 
 
 def _load(filename, size, bold=False):

@@ -25,6 +25,7 @@ def fmt(value):
     text = re.sub(r"\bE\b", "e", text)
     text = re.sub(r"\blog\(", "ln(", text)
     text = text.replace("sqrt", "√")
+    text = re.sub(r"√\(([A-Za-z]|\d+)\)", r"√\g<1>", text)   # √(6) -> √6, √(x) -> √x
     text = re.sub(r"(?<![\w.^])(\d+)\*(?=[A-Za-zπ√(])", r"\g<1>", text)  # 2*x -> 2x, but not x^2*cos
     return text.replace("*", "·")
 
