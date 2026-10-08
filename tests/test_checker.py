@@ -21,7 +21,7 @@ def test_arithmetic_slip():
 
 def test_lost_negative_root():
     _, why = check("check x^2=4 -> x=2")[2]
-    assert "lost the solution x = -2" in why
+    assert "A square root has two signs" in why and "x = -2 was lost" in why
 
 
 def test_or_answers():
@@ -29,8 +29,9 @@ def test_or_answers():
 
 
 def test_squaring_adds_extraneous_root():
-    _, why = check("check sqrt(x)=x-2 -> x=(x-2)^2")[2]
-    assert "added the wrong solution x = 1" in why
+    title, why = check("check sqrt(x)=x-2 -> x=(x-2)^2")[2]
+    assert title.endswith("check needed")
+    assert "x = 1 is extraneous" in why and "Squaring both sides" in why
 
 
 def test_expression_rewrites():

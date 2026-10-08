@@ -85,6 +85,16 @@ def to_sympy(node):
     raise ParseError("Unsupported syntax")
 
 
+def from_sympy(expr):
+    """SymPy expression -> AST, by printing in Pi Core syntax and parsing it back."""
+    import re
+    from .parser import parse
+    text = sp.sstr(expr).replace("**", "^")
+    text = re.sub(r"\bI\b", "i", text)
+    text = re.sub(r"\bE\b", "e", text)
+    return parse(text)
+
+
 # ---- domain analysis -----------------------------------------------------------
 
 @dataclass(frozen=True)

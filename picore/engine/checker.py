@@ -1,179 +1,206 @@
-"""Mistake detective: check a student's working step by step.
+"""Mistake Detective: check a student's working step by step.
 
-    check 2(x+3) = 10 -> 2x + 6 = 10 -> 2x = 4 -> x = 3
+    check x^2 - 5x + 6 = 0 -> x^2 = 5x - 6 -> x = 5 ± √6
+    check (x+1)^2 -> [expand] x^2 + 2x + 1 -> [d/dx] 2x + 2
 
-Each step is compared with the one before it:
-  * expressions must be equal (symbolically, or at least at random sample points)
-  * equations must have the same solutions (dropping or inventing a root is a mistake)
+Each step is judged against the one before it:
+  * plain steps must be equivalent (expressions: equivalence engine, with domains;
+    equations: same solution set)
+  * labelled steps ``[rule]`` must be what that rule produces (see reasoning.derivation)
+When a step is wrong, the mal-rule catalogue (reasoning.mistakes) tries to name the exact
+misconception; if none reproduces the step, the evidence is shown without guessing why.
 """
-import random
 import re
+from dataclasses import dataclass
 
 import sympy as sp
 
-from .parser import ParseError, parse_relation, split_top_level
+from ..lang import ast as A
+from ..lang.sympy_backend import to_sympy
+from ..reasoning import derivation
+from ..reasoning.equivalence import CONDITIONAL, EXACT, NOT, NUMERIC, compare, solution_set
+from ..reasoning.mistakes import Step, run_rules
+from ..reasoning.mistakes.core import proportional
+from ..reasoning.mistakes.equations import show_solutions, single_var
+from .parser import ParseError, parse_ast, split_top_level
 
 SEPARATORS = ["->", "=>", "→", ";", "\n"]
-OK, BAD, UNSURE = "correct", "mistake", "unsure"
+OK, BAD, WARN, UNSURE = "correct", "mistake here", "check needed", "couldn't check"
 
 
 def split_steps(text):
+    """'check a -> [rule] b -> c' -> [('', 'a'), ('rule', 'b'), ('', 'c')]"""
     text = re.sub(r"^\s*check\s+", "", text, flags=re.I)
-    steps = split_top_level(text, SEPARATORS)
-    if len(steps) < 2:
+    raw = split_top_level(text, SEPARATORS)
+    if len(raw) < 2:
         raise ParseError("Give at least two steps, e.g.  check 2x+6=10 -> 2x=4 -> x=2")
+    steps = []
+    for r in raw:
+        m = re.match(r"^\[([^\]]+)\]\s*(.*)$", r)
+        steps.append((m.group(1).strip(), m.group(2).strip()) if m else ("", r))
     return steps
 
 
-class Solutions:
-    """A final answer like 'x = 1 or x = 4'."""
-
-    def __init__(self, var, values):
-        self.var, self.values = var, sp.FiniteSet(*values)
-
-
-def parse_step(text):
+def parse_step(text, label=""):
+    """Build a Step: an expression, an equation, or a final answer ('x = 1 or x = 4', 'x = 2 ± √3')."""
     parts = [p for p in re.split(r"\s+or\s+", text.strip(), flags=re.I) if p]
-    if len(parts) == 1:
-        return parse_relation(text)
-    rels = [parse_relation(p) for p in parts]
-    if all(isinstance(r, sp.Equality) and r.lhs.is_Symbol for r in rels) and len({r.lhs for r in rels}) == 1:
-        return Solutions(rels[0].lhs, [r.rhs for r in rels])
-    raise ParseError("Write alternatives as  x = 1 or x = 4")
+    nodes = []
+    for p in parts:
+        nodes += A.branches(parse_ast(p))
+    if len(nodes) > 1:
+        if all(isinstance(n, A.Equation) and isinstance(n.lhs, A.Var) for n in nodes) \
+                and len({n.lhs.name for n in nodes}) == 1:
+            var = sp.Symbol(nodes[0].lhs.name)
+            return Step(text, None, "solutions", sp.FiniteSet(*[to_sympy(n.rhs) for n in nodes]), var, label)
+        raise ParseError("Write alternatives as  x = 1 or x = 4")
+    node = nodes[0]
+    value = to_sympy(node)
+    if isinstance(node, A.Equation):
+        syms = value.free_symbols
+        return Step(text, node, "equation", value, next(iter(syms)) if len(syms) == 1 else None, label)
+    return Step(text, node, "expr", value, None, label)
 
 
-def _residual(rel):
-    return rel.lhs - rel.rhs if isinstance(rel, sp.Equality) else rel
+@dataclass
+class Judgement:
+    verdict: str
+    reason: str
 
 
-def _numeric_counterexample(a, b, syms, tries=12):
-    """Find a point where a and b clearly differ, or None if they agree everywhere we look."""
-    rng = random.Random(7)
-    for _ in range(tries):
-        point = {s: sp.Rational(rng.randint(-50, 50), rng.randint(1, 7)) for s in syms}
-        try:
-            va, vb = complex(a.subs(point).evalf()), complex(b.subs(point).evalf())
-        except (TypeError, ValueError, ZeroDivisionError):
-            continue
-        if abs(va - vb) > 1e-7 * max(1.0, abs(va), abs(vb)):
-            return point, va, vb
-    return None
+def _solutions(step, var):
+    return step.value if step.kind == "solutions" else solution_set(step.node, var)
 
 
-def _fmt_num(z):
-    if abs(z.imag) < 1e-12:
-        return format(z.real, ".6g")
-    return f"{z.real:.4g} + {z.imag:.4g}i"
+def _diagnose(prev, cur, fallback):
+    d = run_rules(prev, cur)
+    if d:
+        return Judgement(WARN if d.severity == "warning" else BAD, d.text())
+    return Judgement(BAD, fallback)
 
 
-def compare_expressions(a, b):
+def judge_labelled(prev, cur):
     try:
-        if sp.simplify(a - b) == 0:
-            return OK, "Same value: this rewrite is valid."
-    except (TypeError, ValueError, NotImplementedError):
-        pass
-    syms = sorted(a.free_symbols | b.free_symbols, key=lambda s: s.name)
-    hit = _numeric_counterexample(a, b, syms)
-    if hit:
-        point, va, vb = hit
-        where = ", ".join(f"{s} = {v}" for s, v in point.items()) or "these values"
-        return BAD, f"Not equal to the previous step. At {where} the previous step gives " \
-                    f"{_fmt_num(va)} but this one gives {_fmt_num(vb)}."
-    return OK, "Agrees with the previous step at every point tested."
+        transform, arg = derivation.parse_label(cur.label)
+    except ValueError as exc:
+        return Judgement(UNSURE, str(exc))
+    if prev.kind != "expr" or cur.kind != "expr":
+        if transform.name in ("expand", "factor", "simplify", "rearrange"):
+            return judge_plain(prev, cur)
+        return Judgement(UNSURE, f"[{cur.label}] applies to expressions, not equations.")
+    v = transform.verify(prev.value, cur.value, arg)
+    text = f"[{transform.name}] {derivation.STATUS_TEXT[v.status]}. {v.detail}"
+    if v.status in (derivation.PROVED, derivation.CHECKED):
+        return Judgement(OK, text)
+    if v.status == derivation.UNVERIFIED:
+        return Judgement(UNSURE, text)
+    if transform.name == "d/dx":
+        var = arg or (sorted(prev.value.free_symbols, key=lambda s: s.name) or [sp.Symbol("x")])[0].name
+        labelled = Step(prev.text, prev.node, "expr", prev.value, None, f"d/d{var}")
+        return _diagnose(labelled, cur, text)
+    return _diagnose(prev, cur, text)
 
 
-def _solution_set(expr, var):
-    return sp.solveset(sp.simplify(expr), var, domain=sp.S.Complexes)
+def judge_plain(prev, cur):
+    if prev.kind == "expr" and cur.kind == "expr":
+        r = compare(prev.node, cur.node)
+        if r.verdict == EXACT:
+            return Judgement(OK, "Equivalent to the previous step (proved symbolically).")
+        if r.verdict == CONDITIONAL:
+            return Judgement(OK, "Equivalent where both are defined: " + ", ".join(r.restrictions)
+                             + ". " + r.reasons[-1])
+        if r.verdict == NUMERIC:
+            return Judgement(OK, "Agrees with the previous step numerically; not proved symbolically. "
+                             + r.reasons[-1])
+        if r.verdict == NOT:
+            return _diagnose(prev, cur, "Not equal to the previous step. " + r.reasons[-1])
+        return Judgement(UNSURE, "Couldn't decide whether this equals the previous step.")
 
+    if prev.kind == "expr" or cur.kind == "expr":
+        return Judgement(UNSURE, "Can't compare an equation with a plain expression. Keep every step the same kind.")
 
-def _as_solutions(rel, var):
-    if isinstance(rel, Solutions):
-        return rel.values
-    return _solution_set(_residual(rel), var)
-
-
-def compare_equations(e1, e2):
-    if isinstance(e1, Solutions) or isinstance(e2, Solutions):
-        var = e1.var if isinstance(e1, Solutions) else e2.var
-        try:
-            return _compare_sets(_as_solutions(e1, var), _as_solutions(e2, var), var)
-        except (NotImplementedError, ValueError, TypeError):
-            return UNSURE, "Couldn't verify this step automatically."
-    f1, f2 = _residual(e1), _residual(e2)
-    # Same equation scaled or rearranged: f1 = k * f2 for a non-zero constant k.
+    var = single_var(prev, cur)
+    if var is None:
+        if prev.kind == cur.kind == "equation" and proportional(sp.expand(prev.residual), sp.expand(cur.residual)):
+            return Judgement(OK, "Equivalent equation (rearranged or scaled).")
+        d = run_rules(prev, cur)
+        if d:
+            return Judgement(WARN if d.severity == "warning" else BAD, d.text())
+        return Judgement(UNSURE, "Couldn't verify this step automatically (several variables, "
+                                 "and not a simple rearrangement).")
     try:
-        ratio = sp.simplify(f1 / f2)
-        if ratio.is_number and ratio != 0 and ratio.is_finite:
-            return OK, "Equivalent equation (rearranged or scaled)."
-    except (TypeError, ValueError, ZeroDivisionError):
-        pass
-    syms = sorted(f1.free_symbols | f2.free_symbols, key=lambda s: s.name)
-    if len(syms) != 1:
-        return UNSURE, "Couldn't verify this step automatically (several variables, not a simple rearrangement)."
-    var = syms[0]
-    try:
-        s1, s2 = _solution_set(f1, var), _solution_set(f2, var)
+        s1, s2 = _solutions(prev, var), _solutions(cur, var)
     except (NotImplementedError, ValueError, TypeError):
-        return UNSURE, "Couldn't verify this step automatically."
-    return _compare_sets(s1, s2, var)
-
-
-def _compare_sets(s1, s2, var):
+        return Judgement(UNSURE, "Couldn't solve these equations to compare them.")
     if s1 == s2:
-        return OK, "Same solutions as the previous step."
+        if prev.kind == cur.kind == "equation" and proportional(sp.expand(prev.residual), sp.expand(cur.residual)):
+            return Judgement(OK, "Equivalent equation (rearranged or scaled).")
+        return Judgement(OK, "Same solutions as the previous step: " + show_solutions(s1, var) + ".")
     if isinstance(s1, sp.FiniteSet) and isinstance(s2, sp.FiniteSet):
-        from .local import fmt
         lost, gained = s1 - s2, s2 - s1
         parts = []
         if lost:
-            parts.append("lost the solution" + ("s " if len(lost) > 1 else " ")
-                         + ", ".join(f"{var} = {fmt(v)}" for v in lost))
+            parts.append("lost " + show_solutions(lost, var))
         if gained:
-            parts.append("added the wrong solution" + ("s " if len(gained) > 1 else " ")
-                         + ", ".join(f"{var} = {fmt(v)}" for v in gained))
-        hint = ""
-        if lost and not gained:
-            hint = "  (Dividing by something that can be zero, or taking only the + square root, does this.)"
-        if gained and not lost:
-            hint = "  (Squaring both sides can add solutions that don't work, so check each answer in the original.)"
-        return BAD, "This step " + " and ".join(parts) + "." + hint
-    return BAD, "This equation doesn't have the same solutions as the previous step."
+            parts.append("gained " + show_solutions(gained, var) + ", which is not a solution")
+        fallback = (f"This step {' and '.join(parts)}. The previous step's solutions are "
+                    f"{show_solutions(s1, var)}.")
+    else:
+        fallback = "This equation doesn't have the same solutions as the previous step."
+    return _diagnose(prev, cur, fallback)
 
 
 def check(text):
-    """Return result pods: one per step plus a summary."""
-    steps = split_steps(text)
-    rels = []
-    for i, s in enumerate(steps, 1):
+    """Return result pods: a verdict, then one card per step."""
+    raw = split_steps(text)
+    steps = []
+    for i, (label, body) in enumerate(raw, 1):
         try:
-            rels.append(parse_step(s))
+            steps.append(parse_step(body, label))
         except ParseError as exc:
-            raise ParseError(f"Step {i} ('{s}'): {exc}") from None
+            raise ParseError(f"Step {i} ('{body}'): {exc.message}") from None
 
-    shown = [s.replace("**", "^") for s in steps]   # show the working exactly as typed
-    pods = [("Step 1 · starting point", shown[0])]
-    first_bad = None
+    pods = [("Step 1 · starting point", raw[0][1].replace("**", "^"))]
+    first_bad = first_warn = None
     unsure = 0
-    for i in range(1, len(rels)):
-        prev, cur = rels[i - 1], rels[i]
-        prev_eq = isinstance(prev, (sp.Equality, Solutions))
-        cur_eq = isinstance(cur, (sp.Equality, Solutions))
-        if prev_eq and cur_eq:
-            verdict, why = compare_equations(prev, cur)
-        elif not prev_eq and not cur_eq:
-            verdict, why = compare_expressions(prev, cur)
-        else:
-            verdict, why = UNSURE, "Can't compare an equation with a plain expression. Keep every step the same kind."
-        if verdict == BAD and first_bad is None:
+    for i in range(1, len(steps)):
+        prev, cur = steps[i - 1], steps[i]
+        j = judge_labelled(prev, cur) if cur.label else judge_plain(prev, cur)
+        if j.verdict == BAD and first_bad is None:
             first_bad = i + 1
-        unsure += verdict == UNSURE
-        label = {OK: "correct", BAD: "mistake here", UNSURE: "couldn't check"}[verdict]
-        pods.append((f"Step {i + 1} · {label}", f"{shown[i]}\n{why}"))
+        if j.verdict == WARN and first_warn is None:
+            first_warn = i + 1
+        unsure += j.verdict == UNSURE
+        shown = (f"[{cur.label}] " if cur.label else "") + raw[i][1].replace("**", "^")
+        pods.append((f"Step {i + 1} · {j.verdict}", f"{shown}\n{j.reason}"))
 
-    if first_bad:
-        summary = f"First mistake is in step {first_bad}. Later steps are checked against the step just before them."
-    elif unsure:
-        summary = f"No mistakes found, but {unsure} step(s) couldn't be verified automatically."
-    else:
-        summary = f"All {len(rels)} steps check out. Nice work!"
+    summary = _summary(steps, first_bad, first_warn, unsure)
     return [("Verdict", summary)] + pods
+
+
+def _summary(steps, first_bad, first_warn, unsure):
+    lines = []
+    if first_bad:
+        lines.append(f"First mistake is in step {first_bad}. Later steps are checked against the step just before them.")
+    elif first_warn:
+        lines.append(f"No outright errors, but step {first_warn} needs care (see below).")
+    elif unsure:
+        lines.append(f"No mistakes found, but {unsure} step(s) couldn't be verified automatically.")
+    else:
+        lines.append(f"All {len(steps)} steps check out. Nice work!")
+    # Compare the final answer with the original problem: errors can cancel, and
+    # warnings (like squaring) only matter if the final answer is affected.
+    first, last = steps[0], steps[-1]
+    if first.kind == "equation" and last.kind in ("equation", "solutions"):
+        var = single_var(first, last)
+        if var is not None:
+            try:
+                want, got = _solutions(first, var), _solutions(last, var)
+                if want == got:
+                    if first_bad or first_warn:
+                        lines.append(f"Your final answer is still right: {show_solutions(want, var)}.")
+                else:
+                    lines.append(f"Final answer: you have {show_solutions(got, var)}, "
+                                 f"but the original equation's solutions are {show_solutions(want, var)}.")
+            except (NotImplementedError, ValueError, TypeError):
+                pass
+    return " ".join(lines)
