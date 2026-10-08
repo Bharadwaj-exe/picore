@@ -98,6 +98,14 @@ def compare(a, b):
     for c in conds_a + conds_b:          # x/x has no symbols left in SymPy, but its domain does
         symbols |= c.expr.free_symbols
 
+    # A counterexample at a point where both sides are defined PROVES non-equivalence,
+    # and is far cheaper than failing to simplify, so look for one first.
+    relationals = [c.as_relational() for c in conds_a + conds_b]
+    quick = numeric.agree(ea, eb, symbols, n=6, conditions=relationals,
+                          method="Both sides evaluated at random points")
+    if quick.status == "failed":
+        return EquivalenceResult(NOT, ["Not equal: " + quick.summary() + "."], evidence=quick)
+
     proved = symbolic_zero(ea - eb)
     assumed = ""
     if not proved and len(symbols) == 1:

@@ -86,14 +86,19 @@ def fmt(e):
 
 
 def same_value(a, b):
-    """True if two SymPy expressions are equal (symbolically, or at every sample point)."""
-    try:
-        if symbolic_zero(sp.expand(a - b)):
-            return True
-    except (TypeError, ValueError):
-        pass
+    """True if two SymPy expressions are equal (at every sample point, or symbolically).
+
+    Numbers first: one counterexample rejects a candidate in microseconds, whereas
+    symbolic simplification of a wrong candidate can take seconds. Symbolic
+    simplification is only the fallback when sampling is inconclusive.
+    """
     ev = numeric.agree(a, b, n=6)
-    return ev.passed
+    if ev.status != "inconclusive":
+        return ev.passed
+    try:
+        return symbolic_zero(sp.expand(a - b))
+    except (TypeError, ValueError):
+        return False
 
 
 def proportional(r1, r2):
