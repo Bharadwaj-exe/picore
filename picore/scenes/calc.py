@@ -41,7 +41,8 @@ class CalcScene(Scene):
         if not text:
             return
         self.pending_text = text
-        self.app.worker.submit("calc", engine.evaluate, text, self.app.settings.wolfram_app_id)
+        self.app.worker.submit("calc", engine.evaluate, text, self.app.settings.wolfram_app_id,
+                               self.app.settings.wolfram_proxy)
         self.set_status("Computing", T.LOADER)
 
     def open_graph(self):

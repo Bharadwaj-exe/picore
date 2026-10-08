@@ -1,0 +1,12 @@
+name = "picore-proxy"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+
+# 30 requests per minute per IP
+[[ratelimits]]
+name = "LIMITER"
+namespace_id = "1001"
+
+  [ratelimits.simple]
+  limit = 30
+  period = 60

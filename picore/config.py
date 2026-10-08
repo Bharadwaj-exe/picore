@@ -1,6 +1,7 @@
 """User settings and secrets.
 
-The Wolfram|Alpha AppID is looked up, in order, from:
+For word questions the app uses a proxy URL (PICORE_WOLFRAM_PROXY / "wolfram_proxy_url",
+preferred for releases, see proxy/) or a Wolfram|Alpha AppID, looked up in order from:
   1. the PICORE_WOLFRAM_APPID environment variable
   2. config.json in the user data folder
   3. picore.config.json next to the app (git-ignored, for development)
@@ -10,7 +11,7 @@ import os
 
 from .paths import app_root, user_data_dir
 
-DEFAULTS = {"music_on": True, "wolfram_app_id": ""}
+DEFAULTS = {"music_on": True, "wolfram_app_id": "", "wolfram_proxy_url": ""}
 
 
 def _read(path):
@@ -45,3 +46,7 @@ class Settings:
     @property
     def wolfram_app_id(self):
         return os.environ.get("PICORE_WOLFRAM_APPID") or self.get("wolfram_app_id") or None
+
+    @property
+    def wolfram_proxy(self):
+        return os.environ.get("PICORE_WOLFRAM_PROXY") or self.get("wolfram_proxy_url") or None

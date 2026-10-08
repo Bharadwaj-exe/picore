@@ -54,8 +54,24 @@ but only if an AppID is configured. Set it with any one of these:
 2. `config.json` in the user data folder (`%APPDATA%\PiCore` on Windows): `{"wolfram_app_id": "…"}`
 3. `picore.config.json` next to `Pi Core.py` (git-ignored, for development)
 
+Or use a proxy instead of an AppID: `PICORE_WOLFRAM_PROXY` / `"wolfram_proxy_url"` (see [proxy/](proxy/README.md)).
+
 Never commit the AppID. Before a public release, route Wolfram calls through a
 small server you control so the key is not shipped inside the app.
+
+## Build the Windows app
+
+```bash
+pip install pyinstaller
+powershell -ExecutionPolicy Bypass -File packaginguild.ps1
+```
+
+This runs the tests, builds `dist\PiCore\PiCore.exe`, checks that no API key file got bundled,
+and self-tests the exe. If [Inno Setup 6](https://jrsoftware.org/isinfo.php) is installed
+(`winget install JRSoftware.InnoSetup`), it also produces `dist\PiCore-Setup-<version>.exe`.
+
+For a public release, deploy the proxy in [`proxy/`](proxy/README.md) and set `wolfram_proxy_url`,
+so the AppID stays on the server.
 
 ## Data
 
@@ -74,11 +90,14 @@ picore/
   engine/
     parser.py         safe parser (whitelisted AST -> SymPy, no eval)
     local.py          SymPy commands: solve, d/dx, integrate, limit, …
-    wolfram.py        optional Wolfram|Alpha client
+    checker.py        mistake detective (step-by-step checking)
+    wolfram.py        optional Wolfram|Alpha client (direct or via proxy)
   scenes/             loading, menu, calc, graph, history
   ui/                 theme + hand-drawn widgets
 assets/               backgrounds, logo, music
 tests/                pytest suite
+packaging/            PyInstaller spec, Inno Setup script, build.ps1
+proxy/                Cloudflare Worker that hides the Wolfram AppID
 ```
 
 ## Tests

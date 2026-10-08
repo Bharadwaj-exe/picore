@@ -16,7 +16,7 @@ class Response:
         return self.source != "error"
 
 
-def evaluate(text, wolfram_app_id=None):
+def evaluate(text, wolfram_app_id=None, wolfram_proxy=None):
     text = text.strip()
     reason = None
     try:
@@ -27,15 +27,15 @@ def evaluate(text, wolfram_app_id=None):
     except (NotImplementedError, ValueError, TypeError, ZeroDivisionError, RecursionError) as exc:
         reason = f"Offline engine couldn't finish ({exc.__class__.__name__})"
 
-    if wolfram_app_id:
+    if wolfram_app_id or wolfram_proxy:
         try:
-            return Response(wolfram.query(text, wolfram_app_id), "wolfram")
+            return Response(wolfram.query(text, wolfram_app_id, wolfram_proxy), "wolfram")
         except wolfram.WolframError as exc:
             return Response([("Error", str(exc))], "error")
 
     return Response([("Couldn't solve that offline", reason),
-                     ("Tip", "Add a Wolfram|Alpha AppID (see README) to ask word questions "
-                             "like 'distance to the moon'.")], "error")
+                     ("Tip", "Word questions like 'distance to the moon' need the online engine "
+                             "(Wolfram|Alpha AppID or proxy, see README).")], "error")
 
 
 __all__ = ["evaluate", "Response", "ParseError"]

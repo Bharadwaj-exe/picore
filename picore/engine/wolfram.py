@@ -8,13 +8,24 @@ class WolframError(RuntimeError):
     pass
 
 
-def query(text, app_id, timeout=10):
-    """Return a list of (title, content) pods. Raises WolframError on failure."""
-    if not app_id:
-        raise WolframError("No Wolfram|Alpha AppID configured")
+def query(text, app_id=None, proxy_url=None, timeout=12):
+    """Return a list of (title, content) pods. Raises WolframError on failure.
+
+    With ``proxy_url`` the request goes to the πCore proxy (see proxy/), which adds
+    the AppID server-side; otherwise Wolfram|Alpha is called directly with ``app_id``.
+    """
+    if proxy_url:
+        url, params = proxy_url.rstrip("/") + "/query", {"input": text}
+    elif app_id:
+        url, params = API_URL, {"appid": app_id, "input": text, "output": "json"}
+    else:
+        raise WolframError("No Wolfram|Alpha AppID or proxy configured")
     try:
-        r = requests.get(API_URL, params={"appid": app_id, "input": text, "output": "json"},
-                         timeout=timeout)
+        r = requests.get(url, params=params, timeout=timeout)
+        if r.status_code == 429:
+            raise WolframError("Too many online questions right now. Try again in a minute")
+        if proxy_url and r.status_code != 200:
+            raise WolframError(r.json().get("error", f"Proxy error {r.status_code}"))
         r.raise_for_status()
         data = r.json().get("queryresult", {})
     except requests.Timeout:
