@@ -19,7 +19,11 @@ a = Analysis(
     datas=[(os.path.join(ROOT, "assets", f), "assets") for f in ASSETS]
           + [(os.path.join(ROOT, "assets", "fonts", f), "assets/fonts") for f in FONTS],
     hiddenimports=["picore.scenes.calc", "picore.scenes.graph", "picore.scenes.history",
-                   "picore.scenes.simple", "picore.engine.checker"],
+                   "picore.scenes.simple", "picore.scenes.tree", "picore.scenes.explore",
+                   "picore.engine.checker", "picore.engine.reasoning_commands",
+                   "picore.reasoning.mistakes.algebra", "picore.reasoning.mistakes.calculus",
+                   "picore.reasoning.mistakes.equations", "picore.reasoning.mistakes.trig",
+                   "picore.reasoning.mistakes.checks"],
     excludes=["matplotlib", "tkinter", "scipy", "pandas", "IPython", "PyQt5", "PySide6",
               "mysql", "pytest", "PIL", "fontTools"],
     noarchive=False,

@@ -119,9 +119,17 @@ def selftest(out_path):
     """Headless check used by build scripts: engine, assets and storage all work in this build."""
     import json
     from .engine import evaluate
+    from .explore import analyze, make_experiment
+    from .lang import parse
+    from .lang import ast as A
+    exp = make_experiment("a x^2 + b x + c")
     report = {
         "solve": dict(evaluate("2x+3=7").pods).get("Solution"),
         "check": evaluate("check x^2=4 -> x=2").pods[0][1],
+        "diagnosis": evaluate("check d/dx(sin(3x)) -> cos(3x)").pods[2][1].splitlines()[1],
+        "equiv": dict(evaluate("equiv (x^2-1)/(x-1) ; x+1").pods).get("Verdict"),
+        "tree": A.to_text(parse("2sin(x)^2 + 3x")),
+        "explore": analyze(exp).kind,
         "assets": all(os.path.exists(paths.asset(f)) for f in
                       ("background1.png", "background2.png", "picore_logo.png", "bgmusic.mp3")),
         "storage": History(paths.user_data_dir() / "history.db").fetch(1) is not None,

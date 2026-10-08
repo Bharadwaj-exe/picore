@@ -27,7 +27,10 @@ $env:PICORE_SELFTEST = $report
 Start-Process dist\PiCore\PiCore.exe -Wait
 Remove-Item Env:PICORE_SELFTEST
 $r = Get-Content $report -Encoding utf8 | ConvertFrom-Json
-if ($r.solve -ne "x = 2" -or -not $r.assets -or -not $r.storage) { throw "Self-test failed: $(Get-Content $report)" }
+if ($r.solve -ne "x = 2" -or -not $r.assets -or -not $r.storage -or $r.explore -ne "Quadratic" -or
+    -not $r.diagnosis.StartsWith("Calculus") -or -not $r.equiv.StartsWith("Equivalent")) {
+    throw "Self-test failed: $(Get-Content $report)"
+}
 Write-Host "Self-test passed"
 
 $iscc = @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe",

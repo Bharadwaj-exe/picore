@@ -44,6 +44,7 @@ CASES = [
     ("check d/dx(2^x) -> x 2^(x-1)", "exponentials", "2^x·ln(2)"),
     ("check x^2 -> [d/dx] x", "power rule", "2x"),
     ("check sin(30) -> 1/2", "degrees vs radians", "radians"),
+    ("check x^2 + 3x + 2 -> x^2 + 2", "dropped term", "nothing removed"),
 ]
 
 
