@@ -13,6 +13,7 @@ from . import ast as A
 from .errors import ParseError
 
 MAX_EXPONENT = 5000
+MAX_SYMBOLIC_EXPONENT = 200   # x^n with symbolic x: beyond this, expansion/solving explodes in size
 MAX_INT_DIGITS = 100
 MAX_FACTORIAL = 1000
 
@@ -62,6 +63,8 @@ def to_sympy(node):
             return a / b
         if b.is_Number and abs(b) > MAX_EXPONENT and a.is_Number and abs(a) not in (0, 1):
             raise ParseError("Number too large", node.span[0])
+        if b.is_Number and abs(b) > MAX_SYMBOLIC_EXPONENT and a.free_symbols:
+            raise ParseError(f"Exponent too large for symbolic work (the limit is {MAX_SYMBOLIC_EXPONENT})", node.span[0])
         return a ** b
     if isinstance(node, A.Factorial):
         arg = to_sympy(node.operand)

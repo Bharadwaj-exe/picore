@@ -155,7 +155,7 @@ def _split_first(node):
 
 PRECEDENCE = {"=": 0, "+": 1, "-": 1, "±": 1, "*": 2, "/": 2, "neg": 3, "^": 4, "!": 5, "atom": 6}
 PRECEDENCE_NAMES = {0: "equation", 1: "addition / subtraction", 2: "multiplication / division",
-                    3: "negation", 4: "power (right-associative)", 5: "factorial", 6: "atom"}
+                    3: "prefix operator (negation, d/dx)", 4: "power (right-associative)", 5: "factorial", 6: "atom"}
 
 
 def precedence(node):
@@ -165,7 +165,7 @@ def precedence(node):
         return 1
     if isinstance(node, BinOp):
         return PRECEDENCE[node.op]
-    if isinstance(node, Neg):
+    if isinstance(node, (Neg, Deriv)):     # d/dx is a prefix operator: d/dx(f)^2 would mean d/dx(f^2)
         return 3
     if isinstance(node, Factorial):
         return 5
@@ -234,7 +234,8 @@ def to_text(node):
             right = _wrap(node.right, precedence(node.right) < p)
             return f"{left}^{right}"
         left = _wrap(node.left, precedence(node.left) < p)
-        right = _wrap(node.right, precedence(node.right) <= p if node.op in "-/" else precedence(node.right) < p)
+        # left-associative: an equal-precedence operator on the RIGHT needs parentheses (a·(b/c), a − (b − c))
+        right = _wrap(node.right, precedence(node.right) <= p)
         if node.op == "*":
             if isinstance(node.left, Num) and not isinstance(node.right, Num) and not right.startswith("-"):
                 return f"{left}{right}"          # 2x, 3(x+1), 2sin(x)

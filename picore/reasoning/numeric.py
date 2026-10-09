@@ -72,7 +72,7 @@ def _value(expr, point, digits=DIGITS):
         if v.has(sp.zoo, sp.oo, -sp.oo, sp.nan) or not v.is_number:
             return None
         z = complex(v)
-    except (TypeError, ValueError, ZeroDivisionError, OverflowError):
+    except (TypeError, ValueError, ZeroDivisionError, OverflowError, RecursionError):
         return None
     if z != z or abs(z) == float("inf"):
         return None

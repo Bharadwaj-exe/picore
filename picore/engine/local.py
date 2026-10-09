@@ -3,6 +3,7 @@
 ``compute(text)`` returns a list of (title, content) pods, mirroring the shape
 of Wolfram|Alpha results, plus the expression that can be graphed (if any).
 """
+import logging
 import re
 
 import sympy as sp
@@ -14,6 +15,7 @@ from ..lang.printing import needs_approx as _needs_approx
 from .parser import ParseError, normalize_text, parse_expr, parse_relation, parse_system
 
 X = sp.Symbol("x")
+log = logging.getLogger(__name__)
 
 
 def _factorization(n):
@@ -42,6 +44,18 @@ def _solve(relations):
     pods = [("Input", "; ".join(f"{fmt(e.lhs)} = {fmt(e.rhs)}" for e in eqs))]
     if len(eqs) == 1 and len(syms) > 1:
         syms = [_pick_var(eqs[0])]
+    if len(eqs) == 1 and sp.simplify(eqs[0].lhs - eqs[0].rhs) == 0:
+        return pods + [("Solutions", f"Every value of {', '.join(map(str, syms))} is a solution: the equation is an "
+                                     f"identity (both sides are always equal where they are defined).")]
+    if len(eqs) == 1 and len(syms) == 1 and _periodic(eqs[0].lhs - eqs[0].rhs, syms[0]):
+        general = _general_solutions(eqs[0].lhs - eqs[0].rhs, syms[0])
+        if general is not None:
+            lines, empty = general
+            if empty:
+                return pods + [("Real solutions", "None: there are no real solutions (proved).")]
+            return pods + [("All real solutions", "\n".join(lines) + "\n(n is any integer)"),
+                           ("Why a formula?", "The equation repeats periodically, so it has infinitely many "
+                                              "solutions; each line describes a whole family.")]
     try:
         sols = sp.solve(eqs, syms, dict=True)
     except NotImplementedError:
@@ -66,6 +80,12 @@ def _solve(relations):
 
 def _no_closed_form(eqs, syms):
     """solve() found nothing. Never claim 'no solutions' unless that is actually proved."""
+    if len(eqs) > 1 and all((e.lhs - e.rhs).is_polynomial(*syms) for e in eqs):
+        try:
+            if sp.nonlinsolve([e.lhs - e.rhs for e in eqs], syms) == sp.S.EmptySet:
+                return [("Solutions", "None: the equations contradict each other (proved).")]
+        except (NotImplementedError, ValueError, TypeError):
+            pass
     if len(eqs) == 1 and len(syms) == 1:
         var, residual = syms[0], eqs[0].lhs - eqs[0].rhs
         try:
@@ -99,11 +119,68 @@ def _numeric_scan(residual, var):
                                f"[{lo:g}, {hi:g}]: sign changes refined by bisection, plus touching (double) roots "
                                f"found as minima of |f|. Roots outside that range are not listed, and roots closer "
                                f"together than the 0.01 search grid can be missed."),
-            _verification([numeric.check_roots(residual, var, roots)])]
+            _verify(lambda: numeric.check_roots(residual, var, roots))]
 
 
 def _verification(evidence):
     return ("Verification", "\n".join(e.summary() + "." for e in evidence))
+
+
+def real_diff(expr, var):
+    """Differentiate treating var as REAL: d/dx |x| = sign(x), not a complex-analysis Piecewise."""
+    xr = sp.Symbol(var.name, real=True)
+    return sp.diff(expr.subs(var, xr), xr).subs(xr, var)
+
+
+def _verify(check):
+    """Run one numerical check; if it cannot run, say so instead of failing the whole answer."""
+    try:
+        return _verification([check()])
+    except Exception:
+        log.debug("verification failed", exc_info=True)
+        return ("Verification", "Could not be run for this result (not verified).")
+
+
+def _undefined(value):
+    """Human description if a value is undefined / infinite, else None."""
+    if value is sp.zoo or value.has(sp.zoo):
+        return "Undefined: it hits a singularity (division by zero, ln 0, tan(π/2), a negative-integer factorial, …)."
+    if value is sp.nan or value.has(sp.nan):
+        return "Undefined: an indeterminate form (such as 0/0 or ∞ − ∞)."
+    if value in (sp.oo, -sp.oo):
+        return f"{fmt(value)} (unbounded, not a real number)"
+    return None
+
+
+def _periodic(residual, var):
+    """True if the equation repeats periodically in var (so a finite list of roots can't be complete)."""
+    try:
+        return residual.has(sp.sin, sp.cos, sp.tan, sp.cot, sp.sec, sp.csc) and \
+            sp.periodicity(residual, var) is not None
+    except (NotImplementedError, ValueError, TypeError):
+        return False
+
+
+def _general_solutions(residual, var):
+    """All real solutions of a periodic equation as general formulas, e.g. x = 2nπ + π/6 (n ∈ ℤ).
+    Returns (lines, proved_empty) or None if SymPy can't express them."""
+    try:
+        sols = sp.solveset(residual, var, domain=sp.S.Reals)
+    except (NotImplementedError, ValueError, TypeError):
+        return None
+    if sols == sp.S.EmptySet:
+        return [], True
+    parts = sols.args if isinstance(sols, sp.Union) else (sols,)
+    lines = []
+    for part in parts:
+        if isinstance(part, sp.ImageSet) and len(part.lamda.variables) == 1:
+            n = part.lamda.variables[0]
+            lines.append(f"{var} = {fmt(part.lamda.expr.subs(n, sp.Symbol('n')))}")
+        elif isinstance(part, sp.FiniteSet):
+            lines += [f"{var} = {fmt(v)}" for v in part]
+        else:
+            return None
+    return lines, False
 
 
 def _verify_solutions(eqs, sols):
@@ -113,7 +190,7 @@ def _verify_solutions(eqs, sols):
         return ("Verification", "Proved: substituting each solution into the equation gives exactly 0.")
     if len(eqs) == 1 and all(len(s) == 1 for s in sols):
         var = next(iter(sols[0]))
-        return _verification([numeric.check_roots(eqs[0].lhs - eqs[0].rhs, var, [s[var] for s in sols])])
+        return _verify(lambda: numeric.check_roots(eqs[0].lhs - eqs[0].rhs, var, [s[var] for s in sols]))
     return ("Verification", "Could not confirm every solution by substitution.")
 
 
@@ -121,6 +198,9 @@ def _expression_pods(expr, raw):
     pods = [("Input", _pretty_input(raw))]
     if not expr.free_symbols:
         exact = sp.simplify(expr)
+        undefined = _undefined(exact)
+        if undefined:
+            return pods + [("Result", undefined)]
         pods.append(("Result", fmt(exact)))
         if _needs_approx(exact) or (exact.is_Rational and not exact.is_Integer):
             pods.append(("Decimal approximation", _approx(exact, 15)))
@@ -142,10 +222,14 @@ def _expression_pods(expr, raw):
         var = _pick_var(expr)
         pods.append((f"Derivative d/d{var}", fmt(sp.simplify(sp.diff(expr, var)))))
         try:
-            roots = sp.solve(sp.Eq(simple, 0), var)
-            if roots:
-                pods.append(("Roots", ",  ".join(f"{var} = {fmt(r)}" for r in roots[:8])))
-        except (NotImplementedError, ValueError):
+            general = _general_solutions(simple, var) if _periodic(simple, var) else None
+            if general is not None and general[0]:
+                pods.append(("Real roots", "\n".join(general[0]) + "\n(n is any integer)"))
+            elif general is None:
+                roots = sp.solve(sp.Eq(simple, 0), var)
+                if roots:
+                    pods.append(("Roots", ",  ".join(f"{var} = {fmt(r)}" for r in roots[:8])))
+        except (NotImplementedError, ValueError, TypeError):
             pass
     return pods
 
@@ -195,11 +279,15 @@ def compute(text):
             body, var_name = m.group(1), m.group(2)
         expr = parse_expr(body)
         var = _pick_var(expr, var_name)
-        d = sp.diff(expr, var)
+        d = real_diff(expr, var)
         pods = [("Input", f"d/d{var} [{fmt(expr)}]"), ("Derivative", fmt(sp.simplify(d)))]
-        d2 = sp.simplify(sp.diff(d, var))
-        pods.append(("Second derivative", fmt(d2)))
-        pods.append(_verification([numeric.check_derivative(expr, d, var)]))
+        d2 = sp.simplify(real_diff(d, var))
+        if d2.has(sp.DiracDelta):     # a corner (like |x| at 0): no classical second derivative there
+            d2_text = fmt(d2.replace(sp.DiracDelta, lambda *args: 0)) + "  (undefined where the first derivative jumps)"
+        else:
+            d2_text = fmt(d2)
+        pods.append(("Second derivative", d2_text))
+        pods.append(_verify(lambda: numeric.check_derivative(expr, d, var)))
         return pods, expr
 
     m = _RE_INT.match(text)
@@ -210,18 +298,28 @@ def compute(text):
         if lo is not None:
             a, b = parse_expr(lo), parse_expr(hi)
             val = sp.integrate(expr, (var, a, b))
-            pods = [("Input", f"∫ {fmt(expr)} d{var}  from {fmt(a)} to {fmt(b)}"),
-                    ("Definite integral", fmt(val))]
+            pods = [("Input", f"∫ {fmt(expr)} d{var}  from {fmt(a)} to {fmt(b)}")]
+            if val.has(sp.zoo, sp.nan) or val in (sp.oo, -sp.oo):
+                return pods + [("Definite integral", "Does not converge: the integrand is unbounded on the interval "
+                                                     "(or the area is infinite).")], expr
+            pods.append(("Definite integral", fmt(val)))
             if _needs_approx(val):
                 pods.append(("Decimal approximation", _approx(val, 12)))
             if not val.free_symbols:
-                pods.append(_verification([numeric.check_definite_integral(expr, var, a, b, val)]))
+                pods.append(_verify(lambda: numeric.check_definite_integral(expr, var, a, b, val)))
             return pods, expr
         val = sp.integrate(expr, var)
         if val.has(sp.Integral):
             return [("Input", f"∫ {fmt(expr)} d{var}"), ("Indefinite integral", "No closed form found")], expr
-        return [("Input", f"∫ {fmt(expr)} d{var}"), ("Indefinite integral", fmt(val) + " + C"),
-                _verification([numeric.check_antiderivative(val, expr, var)])], expr
+        pods = [("Input", f"∫ {fmt(expr)} d{var}"), ("Indefinite integral", fmt(val) + " + C"),
+                _verify(lambda: numeric.check_antiderivative(val, expr, var))]
+        from ..reasoning.derivation import _domain_shrinks
+        lost = _domain_shrinks(expr, val, var)
+        if lost:
+            pods.append(("Domain note", f"This antiderivative is only valid where it is defined: it is undefined on "
+                                        f"{lost}, where the integrand is defined. Replacing ln(u) by ln|u| gives one "
+                                        f"valid on both sides."))
+        return pods, expr
 
     m = _RE_LIMIT.match(text)
     if m:

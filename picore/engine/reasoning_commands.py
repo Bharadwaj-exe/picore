@@ -33,8 +33,9 @@ def match(text):
             parts = split_top_level(body, seps)
             if len(parts) == 2:
                 return equivalence_pods(parts[0], parts[1])
-        if m:
+        if m and m.group(0).split()[0].lower() in ("equiv", "equivalent", "compare"):
             raise ParseError("Compare two expressions like:  equiv (x+1)^2 ; x^2+2x+1")
+        # 'is …' / 'why …' without two expressions is probably an English question: not ours
     return None
 
 
