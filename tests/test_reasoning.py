@@ -42,7 +42,8 @@ def test_not_equivalent_has_counterexample(a, b):
 def test_numeric_only_is_labelled_as_evidence():
     r = compare("ln(x y)", "ln(x) + ln(y)")
     assert r.verdict == NUMERIC
-    assert "not a proof" in r.reasons[-1]
+    assert any("not a proof" in line for line in r.reasons)
+    assert r.right_undefined_more            # ln x + ln y needs x, y > 0; ln(xy) only needs xy > 0
 
 
 # ---- numerical verification ------------------------------------------------------

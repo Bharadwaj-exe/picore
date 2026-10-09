@@ -15,9 +15,11 @@ from . import numeric
 from .equivalence import EXACT, CONDITIONAL, NUMERIC, NOT, compare
 
 PROVED, CHECKED, FAILED, UNVERIFIED = "proved", "checked", "failed", "unverified"
+RESTRICTED = "restricted"      # right, but only on part of the domain (e.g. ∫1/x = ln x + C only for x > 0)
 STATUS_TEXT = {
     PROVED: "verified symbolically",
-    CHECKED: "checked numerically (evidence, not proof)",
+    CHECKED: "numerically supported (evidence, not proof)",
+    RESTRICTED: "valid only on part of the domain",
     FAILED: "does not follow",
     UNVERIFIED: "could not be verified",
 }
@@ -56,13 +58,21 @@ def _var(expr, arg):
     return sp.Symbol("x") if not syms or sp.Symbol("x") in syms else syms[0]
 
 
+def _constants_note(expr, var):
+    others = sorted((s.name for s in expr.free_symbols if s != var))
+    if not others:
+        return ""
+    return (f" ({', '.join(others)} treated as constant{'s' if len(others) > 1 else ''}; "
+            f"if {' or '.join(others)} depended on {var}, the derivative would have extra terms.)")
+
+
 def _verify_derivative(prev, claimed, arg):
     var = _var(prev, arg)
     exact = sp.diff(prev, var)
     if sp.simplify(exact - claimed) == 0:
         ev = numeric.check_derivative(prev, claimed, var)
         note = f" Independently: {ev.summary()}." if ev.status != "inconclusive" else ""
-        return Verification(PROVED, f"Matches d/d{var} computed symbolically.{note}")
+        return Verification(PROVED, f"Matches d/d{var} computed symbolically.{note}{_constants_note(prev, var)}")
     ev = numeric.check_derivative(prev, claimed, var)
     if ev.status == "failed":
         return Verification(FAILED, ev.summary())
@@ -82,6 +92,12 @@ def _verify_integral(prev, claimed, arg):
     if sp.simplify(sp.diff(body, var) - prev) == 0:
         if not consts:
             return Verification(FAILED, "The antiderivative is right, but the constant of integration (+ C) is missing.")
+        lost = _domain_shrinks(prev, body, var)
+        if lost is not None:
+            return Verification(RESTRICTED, f"Differentiating it gives back {_fmt(prev)}, but only where it is "
+                                            f"defined: it is undefined on {lost}, where {_fmt(prev)} is defined. "
+                                            f"An antiderivative valid on the whole domain is needed (for 1/x that "
+                                            f"is ln|x| + C).")
         return Verification(PROVED, f"Differentiating it gives back {_fmt(prev)}.")
     ev = numeric.check_antiderivative(body, prev, var)
     if ev.status == "failed":
@@ -91,11 +107,26 @@ def _verify_integral(prev, claimed, arg):
     return Verification(UNVERIFIED, "Couldn't check this antiderivative.")
 
 
+def _domain_shrinks(f, F, var):
+    """If F is undefined somewhere f is defined, return that set (formatted), else None."""
+    from ..lang.sympy_backend import domain_conditions, from_sympy
+    from .equivalence import _domain_set, fmt_set
+    try:
+        df = _domain_set(domain_conditions(from_sympy(f)), var)
+        dF = _domain_set(domain_conditions(from_sympy(F)), var)
+    except Exception:          # printing/parsing round trip unsupported for this expression
+        return None
+    if df is None or dF is None:
+        return None
+    missing = sp.Complement(df, dF)
+    return None if missing == sp.S.EmptySet else fmt_set(missing)
+
+
 def _parse_sub(arg):
     m = re.match(r"^\s*([A-Za-z])\s*=\s*(.+)$", arg or "")
     if not m:
         raise ValueError("Write substitutions like [sub x=2]")
-    from ..engine.parser import parse_expr
+    from ..lang.frontend import parse_expr
     return sp.Symbol(m.group(1)), parse_expr(m.group(2))
 
 
@@ -112,7 +143,7 @@ def _verify_sub(prev, claimed, arg):
 
 
 def _fmt(e):
-    from ..engine.local import fmt
+    from ..lang.printing import fmt
     return fmt(e)
 
 
@@ -170,7 +201,7 @@ class DerivedStep:
 
 def derive(start_text, rules):
     """Apply ``rules`` (e.g. ['expand', 'd/dx', 'sub x=1']) in order, verifying each result."""
-    from ..engine.parser import parse_expr
+    from ..lang.frontend import parse_expr
     value = parse_expr(start_text)
     steps = []
     for label in rules:

@@ -13,10 +13,12 @@ from dataclasses import dataclass, field
 import numpy as np
 import sympy as sp
 
-from .engine.parser import ParseError, parse_expr
+from .lang.frontend import ParseError, parse_expr
+from .reasoning import numeric
 
 X = sp.Symbol("x")
 RANGE = (-10.0, 10.0)
+EXPLORE_GRID = 1001          # coarser than the solver (step 0.02) so slider drags stay smooth
 
 
 @dataclass
@@ -189,7 +191,6 @@ class Generic(Analyzer):
 
     def analyze(self, exp):
         out = Analysis()
-        f = sp.lambdify(X, exp.current(), modules="numpy")
         try:
             y0 = complex(sp.N(exp.current().subs(X, 0)))
             if abs(y0.imag) < 1e-12 and np.isfinite(y0.real):
@@ -197,43 +198,15 @@ class Generic(Analyzer):
                 out.markers.append((0.0, y0.real, "", "point"))
         except (TypeError, ValueError, ZeroDivisionError):
             pass
-        roots = numeric_roots(f, *RANGE)
+        roots = numeric.real_roots(exp.current(), X, *RANGE, n=EXPLORE_GRID)
+        label = f"Real roots found in [{RANGE[0]:g}, {RANGE[1]:g}]"
         if roots:
             shown = ",  ".join(f"x ≈ {_num(r)}" for r in roots[:6]) + ("  …" if len(roots) > 6 else "")
-            out.facts.append(Fact(f"Real roots in [{RANGE[0]:g}, {RANGE[1]:g}]", shown,
-                                  "Found numerically (sign changes, then refined)."))
+            out.facts.append(Fact(label, shown, "Found numerically; the list may be incomplete."))
             out.markers += [(r, 0.0, "", "root") for r in roots]
         else:
-            out.facts.append(Fact(f"Real roots in [{RANGE[0]:g}, {RANGE[1]:g}]", "none found"))
+            out.facts.append(Fact(label, "none found by the numerical search (not a proof that none exist)"))
         return out
-
-
-def numeric_roots(f, lo, hi, n=4001):
-    xs = np.linspace(lo, hi, n)
-    with np.errstate(all="ignore"):
-        ys = np.asarray(f(xs), dtype=complex) * np.ones_like(xs)
-    ys = np.where(np.abs(ys.imag) < 1e-9, ys.real, np.nan).real
-    roots = []
-    for i in range(n - 1):
-        a, b, fa, fb = xs[i], xs[i + 1], ys[i], ys[i + 1]
-        if not (np.isfinite(fa) and np.isfinite(fb)):
-            continue
-        if fa == 0:
-            roots.append(float(a))
-        elif fa * fb < 0:
-            for _ in range(50):                       # bisection
-                mid = (a + b) / 2
-                with np.errstate(all="ignore"):
-                    fm = complex(f(mid)).real
-                if fa * fm <= 0:
-                    b = mid
-                else:
-                    a, fa = mid, fm
-            r = (a + b) / 2
-            with np.errstate(all="ignore"):
-                if abs(complex(f(r))) < 1e-6:        # sign change at a pole is not a root
-                    roots.append(float(r))
-    return roots
 
 
 SPECIFIC = [Quadratic(), Linear(), Sinusoid()]

@@ -8,41 +8,12 @@ import re
 import sympy as sp
 
 from ..reasoning import numeric
+from ..lang.printing import approx as _approx
+from ..lang.printing import fmt
+from ..lang.printing import needs_approx as _needs_approx
 from .parser import ParseError, normalize_text, parse_expr, parse_relation, parse_system
 
 X = sp.Symbol("x")
-
-
-def fmt(value):
-    """Human-friendly one-line rendering of a SymPy object."""
-    if isinstance(value, sp.Float) or (getattr(value, "is_number", False) and value.is_Float):
-        return format(float(value), ".15g")
-    text = sp.sstr(value)
-    text = text.replace("**", "^")
-    text = re.sub(r"\bpi\b", "π", text)
-    text = re.sub(r"\boo\b", "∞", text)
-    text = re.sub(r"\bI\b", "i", text)
-    text = re.sub(r"\bE\b", "e", text)
-    text = re.sub(r"\blog\(", "ln(", text)
-    text = text.replace("sqrt", "√")
-    text = re.sub(r"√\(([A-Za-z]|\d+)\)", r"√\g<1>", text)   # √(6) -> √6, √(x) -> √x
-    text = re.sub(r"(?<![\w.^])(\d+)\*(?=[A-Za-zπ√(])", r"\g<1>", text)  # 2*x -> 2x, but not x^2*cos
-    return text.replace("*", "·")
-
-
-def _needs_approx(v):
-    if not getattr(v, "is_number", False):
-        return False
-    re_, im_ = v.as_real_imag()
-    return not (re_.is_Rational and im_.is_Rational)
-
-
-def _approx(v, digits=10):
-    re_, im_ = (sp.N(part, digits) for part in v.as_real_imag())
-    if im_ == 0:
-        return format(float(re_), f".{digits}g")
-    sign = "+" if im_ >= 0 else "-"
-    return f"{format(float(re_), f'.{digits}g')} {sign} {format(abs(float(im_)), f'.{digits}g')}i"
 
 
 def _factorization(n):
@@ -114,40 +85,20 @@ def _no_closed_form(eqs, syms):
     return [("Solutions", "No closed-form solution found. This does not mean there are none.")]
 
 
-SCAN = (-20, 20)
-
-
-def _numeric_scan(residual, var, steps=4000):
-    """Real roots in SCAN by sign changes + refinement. Honest about being incomplete."""
-    import numpy as np
-    f = sp.lambdify(var, residual, modules="mpmath")
-    xs = np.linspace(*SCAN, steps)
-    vals = []
-    for xv in xs:
-        try:
-            v = complex(f(float(xv)))
-            vals.append(v.real if abs(v.imag) < 1e-12 else float("nan"))
-        except (ValueError, ZeroDivisionError, OverflowError, TypeError):
-            vals.append(float("nan"))
-    roots = []
-    for a, b, fa, fb in zip(xs, xs[1:], vals, vals[1:]):
-        if fa == 0:
-            roots.append(sp.Float(a))
-        elif fa * fb < 0:
-            try:
-                r = sp.nsolve(residual, var, (float(a), float(b)), solver="bisect")
-            except (ValueError, ZeroDivisionError, TypeError):
-                continue
-            if abs(complex(residual.subs(var, r).evalf())) < 1e-8:      # a root, not a pole
-                roots.append(r)
+def _numeric_scan(residual, var):
+    """Real roots found numerically (numeric.real_roots). Honest about being incomplete."""
+    lo, hi = numeric.ROOT_RANGE
+    roots = numeric.real_roots(residual, var)
     if not roots:
-        return [("Solutions", f"No exact solution found, and no real roots in [{SCAN[0]}, {SCAN[1]}]. "
-                              f"There may still be solutions outside that range or complex ones.")]
-    lines = [f"{var} ≈ {_approx(r, 10)}" for r in roots]
+        return [("Solutions", f"None found. No exact solution was found, and this numerical method found no "
+                              f"real roots in [{lo:g}, {hi:g}]. That is not a proof that none exist: there may be "
+                              f"roots outside that range, roots it cannot resolve, or complex ones.")]
+    lines = [f"{var} ≈ {_approx(sp.Float(r, 15), 10)}" for r in roots]
     return [("Solutions (numerical)", "\n".join(lines)),
-            ("Why numerical?", f"This equation mixes kinds of functions, so it has no closed-form solution "
-                               f"SymPy can find. Real roots were located numerically in [{SCAN[0]}, {SCAN[1]}] by "
-                               f"looking for sign changes; roots outside that range are not listed."),
+            ("Why numerical?", f"No closed-form solution was found, so real roots were located numerically in "
+                               f"[{lo:g}, {hi:g}]: sign changes refined by bisection, plus touching (double) roots "
+                               f"found as minima of |f|. Roots outside that range are not listed, and roots closer "
+                               f"together than the 0.01 search grid can be missed."),
             _verification([numeric.check_roots(residual, var, roots)])]
 
 

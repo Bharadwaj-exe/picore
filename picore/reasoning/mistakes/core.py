@@ -16,6 +16,7 @@ reproduces the student's step. If nothing matches, Pi Core says the step is wron
 Adding a rule: subclass MalRule (or RewriteRule) in one of the rule modules and
 decorate it with @register. Nothing else needs to change.
 """
+import logging
 from dataclasses import dataclass, field
 
 import sympy as sp
@@ -26,19 +27,23 @@ from .. import numeric
 from ..equivalence import symbolic_zero
 
 
+log = logging.getLogger(__name__)
+
+
 @dataclass
 class Step:
     text: str
     node: object                      # AST (Equation or expression); None for 'or' answers
-    kind: str                         # "expr" | "equation" | "solutions"
+    kind: str                         # "expr" | "equation" | "solutions" | "disjunction"
     value: object                     # SymPy expr, Eq, or FiniteSet for solutions
     var: object = None                # solved-for variable (solutions / single-variable steps)
     label: str = ""                   # claimed justification, e.g. "expand" from "[expand]"
+    alternatives: tuple = ()          # for "disjunction": Equation ASTs joined by "or" / "±" (e.g. x = ±√(2x+8))
 
     @property
     def residual(self):
         """lhs − rhs for an equation; the expression itself otherwise."""
-        if self.kind == "equation":
+        if self.kind in ("equation", "disjunction"):     # a disjunction's value is Eq(product of residuals, 0)
             return self.value.lhs - self.value.rhs
         return self.value
 
@@ -52,6 +57,8 @@ class Diagnosis:
     correct: str = ""                  # the correct transformation, when known
     severity: str = "error"            # "error" | "warning" (valid only with extra care)
     evidence: list = field(default_factory=list)
+    kind: str = "misconception"        # "misconception": names WHY (a mal-rule reproduced the step)
+                                       # "descriptive": states WHAT is wrong (coefficients, domain) without a cause
 
     def text(self):
         lines = [f"{self.category}: {self.title}", self.explanation]
@@ -81,7 +88,7 @@ def register(cls):
 # ---- matching helpers ---------------------------------------------------------------
 
 def fmt(e):
-    from ...engine.local import fmt as _fmt
+    from ...lang.printing import fmt as _fmt
     return _fmt(e)
 
 
@@ -154,6 +161,11 @@ def matches_step(candidate_tree, cur):
     return False
 
 
+def _same_text(a, b):
+    squash = lambda t: t.replace(" ", "").replace("·", "").replace("*", "")
+    return squash(a) == squash(b)
+
+
 class RewriteRule(MalRule):
     """A mal-rule expressed as an AST rewrite.
 
@@ -183,8 +195,12 @@ class RewriteRule(MalRule):
                 correct = self.correct_for(at, info)
                 if isinstance(correct, str):
                     fix = correct
+                elif correct is None:
+                    fix = ""
+                elif _same_text(fmt(correct), A.to_text(at)):     # compare with what was WRITTEN, not SymPy's value
+                    fix = f"{A.to_text(at)} has no simpler form: leave it as it is"
                 else:
-                    fix = f"{A.to_text(at)} = {fmt(correct)}" if correct is not None else ""
+                    fix = f"{A.to_text(at)} = {fmt(correct)}"
                 return Diagnosis(self.id, self.category, title, why, fix)
         return None
 
@@ -196,7 +212,8 @@ def run_rules(prev, cur):
             continue
         try:
             found = rule.detect(prev, cur)
-        except (NotImplementedError, ValueError, TypeError, ZeroDivisionError, RecursionError, AttributeError):
+        except Exception:           # a rule that cannot evaluate this step simply does not apply
+            log.debug("rule %s failed on %r -> %r", rule.id, prev.text, cur.text, exc_info=True)
             continue
         if found:
             return found

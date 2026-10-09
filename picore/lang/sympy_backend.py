@@ -110,15 +110,26 @@ class Condition:
 
     def describe(self):
         sym = {"nonzero": "≠ 0", "positive": "> 0", "nonnegative": "≥ 0"}[self.kind]
-        from ..engine.local import fmt
+        from .printing import fmt
         return f"{fmt(self.expr)} {sym}  ({self.reason})"
 
 
 def domain_conditions(node):
-    """All definedness conditions found in the AST (duplicates removed, constants skipped)."""
+    """All definedness conditions found in the AST (duplicates removed, constants skipped).
+
+    A derivative d/dx f is defined where its RESULT is defined, not where f is
+    (√x is defined at 0, its derivative 1/(2√x) is not), so for Deriv nodes the
+    conditions are read from the computed derivative instead of the operand."""
     found = []
-    for n in A.walk(node):
+
+    def visit(n):
         try:
+            if isinstance(n, A.Deriv):
+                try:
+                    found.extend(domain_conditions(from_sympy(to_sympy(n))))
+                except Exception:          # result not expressible in Pi Core syntax: no conditions recorded
+                    pass
+                return
             if isinstance(n, A.BinOp) and n.op == "/":
                 found.append(Condition(to_sympy(n.right), "nonzero", f"denominator in {A.to_text(n)}"))
             elif isinstance(n, A.BinOp) and n.op == "^":
@@ -134,13 +145,33 @@ def domain_conditions(node):
             elif isinstance(n, A.Call) and n.func in ("cot", "csc"):
                 found.append(Condition(sp.sin(to_sympy(n.args[0])), "nonzero", f"{n.func} is undefined where sin = 0"))
         except ParseError:
-            continue
+            pass
+        for c in A.children(n):
+            visit(c)
+
+    visit(node)
     unique, seen = [], set()
     for c in found:
         if c.expr.free_symbols and (c.expr, c.kind) not in seen:
             seen.add((c.expr, c.kind))
             unique.append(c)
     return unique
+
+
+def holds(conditions, point):
+    """True/False whether every condition holds at a numeric point; None if it can't be evaluated."""
+    for c in conditions:
+        try:
+            v = complex(sp.N(c.expr.subs(point), 30))
+        except (TypeError, ValueError, ZeroDivisionError):
+            return None
+        if abs(v.imag) > 1e-12 * max(1.0, abs(v.real)):
+            return False
+        r = v.real
+        ok = {"nonzero": abs(r) > 1e-9, "positive": r > 1e-12, "nonnegative": r >= -1e-12}[c.kind]
+        if not ok:
+            return False
+    return True
 
 
 def excluded_points(conditions, var):

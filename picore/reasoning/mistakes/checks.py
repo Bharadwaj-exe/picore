@@ -64,7 +64,7 @@ class IncorrectFactorisation(MalRule):
             return None
         return Diagnosis(self.id, self.category, "These factors don't multiply back to the original",
                          f"Expanding {A.to_text(mine)} gives {fmt(expanded)}: " + "; ".join(diffs) + ".",
-                         f"{fmt(sp.expand(target))} = {fmt(sp.factor(target))}")
+                         f"{fmt(sp.expand(target))} = {fmt(sp.factor(target))}", kind="descriptive")
 
 
 @register
@@ -86,4 +86,4 @@ class IncorrectExpansion(MalRule):
             return None
         return Diagnosis(self.id, self.category, "The expansion has a wrong coefficient",
                          "Comparing term by term with the correct expansion: " + "; ".join(diffs) + ".",
-                         f"{A.to_text(prev.node)} = {fmt(sp.expand(prev.value))}")
+                         f"{A.to_text(prev.node)} = {fmt(sp.expand(prev.value))}", kind="descriptive")

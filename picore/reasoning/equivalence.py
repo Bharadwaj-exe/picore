@@ -39,6 +39,8 @@ class EquivalenceResult:
     reasons: list = field(default_factory=list)       # human-readable reasoning, in order
     restrictions: list = field(default_factory=list)  # e.g. ["x ≠ 1"]
     evidence: object = None                           # numeric.Evidence, if sampling was used
+    left_undefined_more: bool = False   # the left side is undefined somewhere the right is defined
+    right_undefined_more: bool = False  # the right side is undefined somewhere the left is defined
 
     @property
     def equivalent(self):
@@ -50,7 +52,7 @@ class EquivalenceResult:
 
 
 def _fmt(e):
-    from ..engine.local import fmt
+    from ..lang.printing import fmt
     return fmt(e)
 
 
@@ -112,9 +114,11 @@ def compare(a, b):
         proved, assumed = _zero_on_common_domain(ea, eb, conds_a, conds_b, next(iter(symbols)))
     if proved:
         reasons.append(f"Symbolic: ({_fmt(ea)}) − ({_fmt(eb)}) simplifies to 0{assumed}.")
-        restrictions = _domain_difference(conds_a, conds_b, symbols, reasons)
+        lost = {"left": False, "right": False}
+        restrictions = _domain_difference(conds_a, conds_b, symbols, reasons, lost)
         if restrictions:
-            return EquivalenceResult(CONDITIONAL, reasons, restrictions)
+            return EquivalenceResult(CONDITIONAL, reasons, restrictions,
+                                     left_undefined_more=lost["left"], right_undefined_more=lost["right"])
         if conds_a or conds_b:
             reasons.append("Both sides are defined in exactly the same places.")
         return EquivalenceResult(EXACT, reasons)
@@ -129,7 +133,10 @@ def compare(a, b):
     if ev.status == "passed":
         reasons.append("Symbolic simplification could not prove they are equal.")
         reasons.append(ev.summary() + ".")
-        return EquivalenceResult(NUMERIC, reasons, evidence=ev)
+        lost = {"left": False, "right": False}
+        restrictions = _domain_difference(conds_a, conds_b, symbols, reasons, lost)
+        return EquivalenceResult(NUMERIC, reasons, restrictions, evidence=ev,
+                                 left_undefined_more=lost["left"], right_undefined_more=lost["right"])
     reasons.append("Could not simplify the difference to 0 or find valid test points.")
     return EquivalenceResult(UNKNOWN, reasons, evidence=ev)
 
@@ -166,8 +173,9 @@ def fmt_set(s):
     return _fmt(s)
 
 
-def _domain_difference(conds_a, conds_b, symbols, reasons):
-    """Describe where exactly one side is undefined. Returns restriction strings (empty if none)."""
+def _domain_difference(conds_a, conds_b, symbols, reasons, lost):
+    """Describe where exactly one side is undefined. Returns restriction strings (empty if none)
+    and records in ``lost`` which side ("left"/"right") is undefined somewhere the other is not."""
     if not conds_a and not conds_b:
         return []
     if len(symbols) == 1:
@@ -182,6 +190,7 @@ def _domain_difference(conds_a, conds_b, symbols, reasons):
             for missing, side, other in ((only_b, "left", "right"), (only_a, "right", "left")):
                 if missing == sp.S.EmptySet:
                     continue
+                lost[side] = True
                 if isinstance(missing, sp.FiniteSet):
                     pts = ", ".join(f"{var} = {_fmt(p)}" for p in missing)
                     reasons.append(f"Domain: the {side} side is undefined at {pts}, but the {other} side is defined there.")
@@ -192,16 +201,42 @@ def _domain_difference(conds_a, conds_b, symbols, reasons):
                     restrictions.append(f"{var} ∉ {fmt_set(missing)}")
             reasons.append("So they are equal only where both are defined: " + ", ".join(restrictions) + ".")
             return restrictions
-    # several variables: compare the conditions themselves
-    keys_a = {(sp.simplify(c.expr), c.kind) for c in conds_a}
-    keys_b = {(sp.simplify(c.expr), c.kind) for c in conds_b}
-    extra = [c for c in conds_a if (sp.simplify(c.expr), c.kind) not in keys_b] + \
-            [c for c in conds_b if (sp.simplify(c.expr), c.kind) not in keys_a]
-    if not extra:
+    # several variables: a condition is only "extra" if there is a WITNESS point where the
+    # other side's conditions all hold but this one fails (x ≠ 0 and x² ≠ 0 are the same).
+    extra_a = [c for c in conds_a if _witness(c, conds_b, symbols) is not None]
+    extra_b = [c for c in conds_b if _witness(c, conds_a, symbols) is not None]
+    if not extra_a and not extra_b:
         return []
-    restrictions = [c.describe() for c in extra]
+    lost["left"], lost["right"] = bool(extra_a), bool(extra_b)
+    restrictions = [c.describe() for c in extra_a + extra_b]
     reasons.append("Domain: only one side requires " + "; ".join(restrictions) + ".")
     return restrictions
+
+
+def _witness(cond, others, symbols, tries=12):
+    """A point where every condition in ``others`` holds but ``cond`` fails, or None."""
+    from ..lang.sympy_backend import holds
+    symbols = sorted(symbols, key=lambda s: s.name)
+    candidates = []
+    if cond.kind in ("nonzero", "positive"):          # where cond.expr = 0
+        for v in sorted(cond.expr.free_symbols, key=lambda s: s.name):
+            try:
+                sols = sp.solve(cond.expr, v)
+            except (NotImplementedError, ValueError, TypeError):
+                continue
+            for sol in sols[:4]:
+                rest = [s for s in symbols if s != v]
+                for p in numeric.sample_points(rest, tries) if rest else [{}]:
+                    candidates.append({**p, v: sol.subs(p)})
+    if cond.kind in ("positive", "nonnegative"):        # where cond.expr < 0
+        candidates += numeric.sample_points(symbols, tries * 2)
+    for point in candidates:
+        try:
+            if holds(others, point) and holds([cond], point) is False:
+                return point
+        except (TypeError, ValueError):
+            continue
+    return None
 
 
 def solution_set(node, var):

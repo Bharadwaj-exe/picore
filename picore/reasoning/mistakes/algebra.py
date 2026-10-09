@@ -3,7 +3,7 @@ import sympy as sp
 
 from ...lang import ast as A
 from ...lang.sympy_backend import from_sympy, to_sympy
-from .core import RewriteRule, register
+from .core import Diagnosis, MalRule, RewriteRule, fmt, proportional, register, same_value
 
 Num, BinOp, Neg, Call = A.Num, A.BinOp, A.Neg, A.Call
 
@@ -132,15 +132,32 @@ class InvalidCancellation(RewriteRule):
 class FractionAddition(RewriteRule):
     id = "algebra.fraction_addition"
     category = "Algebra · fractions"
-    title = "Fractions are not added by adding tops and bottoms"
-    explanation = "a/b + c/d = (ad + bc)/(bd), not (a + c)/(b + d). Use a common denominator."
+    TEXT = {
+        "add": ("Fractions are not added by adding tops and bottoms",
+                "a/b + c/d = (ad + bc)/(bd), not (a + c)/(b + d). Use a common denominator."),
+        "split": ("A fraction does not split over a sum in its denominator",
+                  "k/(a + b) ≠ k/a + k/b (try 1/(1 + 1) = 1/2, but 1/1 + 1/1 = 2). Only a sum on TOP splits: "
+                  "(a + b)/k = a/k + b/k."),
+    }
 
     def buggy(self, node):
+        out = []
         if _is(node, "+") and _is(node.left, "/") and _is(node.right, "/"):
             wrong = BinOp("/", BinOp("+", node.left.left, node.right.left),
                           BinOp("+", node.left.right, node.right.right))
-            return [(wrong, sp.together(to_sympy(node)))]
-        return []
+            out.append((wrong, ("add", sp.together(to_sympy(node)))))
+        if _is(node, "/") and (_is(node.right, "+") or _is(node.right, "-")):      # 1/(x + y) -> 1/x + 1/y
+            terms = _terms(node.right)
+            wrong = _sum([Neg(BinOp("/", node.left, t.operand)) if isinstance(t, Neg) else BinOp("/", node.left, t)
+                          for t in terms])
+            out.append((wrong, ("split", f"{A.to_text(node)} cannot be split into separate fractions")))
+        return out
+
+    def describe(self, at, info):
+        return self.TEXT[info[0]]
+
+    def correct_for(self, at, info):
+        return info[1]
 
 
 @register
@@ -155,7 +172,6 @@ class ExponentRules(RewriteRule):
         "div": ("xᵃ / xᵇ = xᵃ⁻ᵇ: when dividing powers of the same base, SUBTRACT the exponents.",),
         "neg": ("x⁻ⁿ = 1/xⁿ: a negative exponent means a reciprocal, not a negative number.",),
         "prod": ("(ab)ⁿ = aⁿbⁿ: the power applies to EVERY factor in the brackets.",),
-        "recip": ("1/(a + b) ≠ 1/a + 1/b: a reciprocal does not split over a sum.",),
         "sumexp": ("x^(a + b) = xᵃ · xᵇ: a sum in the exponent becomes a PRODUCT of powers, not a sum.",),
     }
 
@@ -182,10 +198,6 @@ class ExponentRules(RewriteRule):
             out.append((_sum(pieces), ("sumexp", prod)))
         if _is(node, "^") and _is(node.left, "*"):
             out.append((BinOp("*", node.left.left, BinOp("^", node.left.right, node.right)), ("prod", correct)))
-        if _is(node, "/") and isinstance(node.left, Num) and (_is(node.right, "+") or _is(node.right, "-")):
-            terms = _terms(node.right)
-            out.append((_sum([Neg(BinOp("/", node.left, t.operand)) if isinstance(t, Neg) else BinOp("/", node.left, t)
-                              for t in terms]), ("recip", correct)))
         return out
 
     def describe(self, at, info):
@@ -201,10 +213,15 @@ def _naive_root(piece):
     call = piece.operand if neg else piece
     arg = call.args[0]
     out = call
-    if _is(arg, "^") and _int(arg.right) == 2:
-        out = arg.left
-    elif isinstance(arg, Num) and arg.value.isdigit() and int(arg.value) ** 0.5 == int(int(arg.value) ** 0.5):
-        out = Num(str(int(int(arg.value) ** 0.5)))
+    try:   # take the root as if every variable were positive: √(9y²) -> 3y, √9 -> 3
+        value = to_sympy(arg)
+        pos = {s: sp.Symbol(s.name, positive=True) for s in value.free_symbols}
+        root = sp.sqrt(value.subs(pos)).subs({v: k for k, v in pos.items()})
+        if not root.has(sp.sqrt(sp.Symbol("_")).func) and not any(p.exp.is_Rational and not p.exp.is_Integer
+                                                                 for p in root.atoms(sp.Pow)):
+            out = from_sympy(root)
+    except Exception:
+        pass
     return Neg(out) if neg else out
 
 
@@ -242,6 +259,8 @@ class FunctionTreatedAsLinear(RewriteRule):
                 out.append((_sum([_naive_root(p) for p in pieces]), correct))
         if _is(arg, "*") and isinstance(arg.left, Num):
             out.append((BinOp("*", arg.left, Call(node.func, (arg.right,))), correct))
+        if _is(arg, "/") and isinstance(arg.right, Num):                 # sin(θ/2) -> sin(θ)/2
+            out.append((BinOp("/", Call(node.func, (arg.left,)), arg.right), correct))
         return out
 
     def describe(self, at, info):
@@ -284,3 +303,39 @@ class LogProductRules(RewriteRule):
         if info == "sum":
             return sp.logcombine(to_sympy(at), force=True)
         return sp.expand_log(to_sympy(at), force=True)
+
+
+def _as_log10(node):
+    if isinstance(node, Call) and node.func == "log" and len(node.args) == 1:
+        return Call("log10", (_as_log10(node.args[0]),))
+    kids = A.children(node)
+    return A.with_children(node, tuple(_as_log10(k) for k in kids)) if kids else node
+
+
+@register
+class LogBase(MalRule):
+    """log(1000x) -> 3 + log(x): the student reads log as base 10. In Pi Core log means ln.
+    Detected by re-reading BOTH steps with log = log10: if the step is then valid, that was the cause."""
+    id = "algebra.log_base"
+    category = "Algebra · logarithm base"
+    applies_to = ("expr", "equation")
+
+    def detect(self, prev, cur):
+        if prev.node is None or cur.node is None:
+            return None
+        if not any(isinstance(n, Call) and n.func == "log" for n in A.walk(prev.node)):
+            return None
+        try:
+            p10, c10 = to_sympy(_as_log10(prev.node)), to_sympy(_as_log10(cur.node))
+        except Exception:
+            return None
+        if isinstance(p10, sp.Equality) or isinstance(c10, sp.Equality):
+            ok = isinstance(p10, sp.Equality) and isinstance(c10, sp.Equality) and                 proportional(sp.expand(p10.lhs - p10.rhs), sp.expand(c10.lhs - c10.rhs))
+        else:
+            ok = same_value(p10, c10)
+        if not ok:
+            return None
+        return Diagnosis(self.id, self.category, "log here means the natural logarithm ln",
+                         "This step is right if log means log base 10, but in Pi Core (as in most of calculus) "
+                         "log x means ln x. Write log10(x) for a base-10 logarithm.",
+                         f"with ln: {A.to_text(prev.node)} = {fmt(sp.expand_log(prev.value, force=True))}")

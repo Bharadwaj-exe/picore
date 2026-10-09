@@ -11,3 +11,8 @@ picore.config.json
 
 # personal-use-only demo font: never commit or ship publicly
 assets/fonts/ShotengaiDemo.otf
+
+# test / coverage artefacts
+.coverage
+.coverage.*
+htmlcov/

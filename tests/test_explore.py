@@ -2,7 +2,8 @@ import pytest
 import sympy as sp
 
 from picore.engine.parser import ParseError
-from picore.explore import analyze, make_experiment, numeric_roots
+from picore.explore import analyze, make_experiment
+from picore.reasoning.numeric import real_roots
 
 
 def run(text, **values):
@@ -53,8 +54,8 @@ def test_sinusoid():
 
 def test_generic_finds_roots_numerically_and_skips_poles():
     f = facts(run("a e^(b x) - 2", a=1, b=1))
-    assert "0.6931" in f["Real roots in [-10, 10]"]
-    assert numeric_roots(lambda x: 1 / x, -5, 5) == []          # sign change at a pole is not a root
+    assert "0.6931" in f["Real roots found in [-10, 10]"]
+    assert real_roots(1 / sp.Symbol("x"), sp.Symbol("x"), -5, 5) == []   # sign change at a pole is not a root
 
 
 def test_linear_has_single_intercept_fact():

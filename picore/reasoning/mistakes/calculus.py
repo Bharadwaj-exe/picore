@@ -31,6 +31,8 @@ BUGS = {
                   "d/dx sin x = cos x, but d/dx cos x = −sin x (note the minus)."),
     "exp_as_power": ("Calculus · exponentials", "aˣ is an exponential, not a power",
                      "The power rule needs a constant exponent. For a constant base, d/dx aˣ = aˣ·ln a."),
+    "coefficient_dropped": ("Calculus · constant multiple", "A constant factor stays in the derivative",
+                            "d/dx (k·f) = k·f′: the constant k is kept, not dropped."),
 }
 
 
@@ -55,6 +57,8 @@ def differentiate(node, var, bug=None):
                 return d(n.left) + d(n.right) if n.op == "+" else d(n.left) - d(n.right)
             du, dv = d(n.left), d(n.right)
             if n.op == "*":
+                if kind == "coefficient_dropped":            # d(4t³) -> 3t²: the constant 4 vanished
+                    return dv if x not in u.free_symbols else du
                 return du * dv if kind == "product_naive" else du * v + u * dv
             if n.op == "/":
                 if kind == "quotient_naive":
@@ -103,8 +107,11 @@ def bug_sites(node, var):
         if x not in s.free_symbols:
             continue
         if isinstance(n, A.BinOp) and n.op == "*":
-            if all(x in to_sympy(c).free_symbols for c in (n.left, n.right)):
+            has = [x in to_sympy(c).free_symbols for c in (n.left, n.right)]
+            if all(has):
                 yield n, "product_naive"
+            elif any(has):
+                yield n, "coefficient_dropped"
         elif isinstance(n, A.BinOp) and n.op == "/" and x in to_sympy(n.right).free_symbols:
             yield n, "quotient_naive"
             yield n, "quotient_sign"
@@ -158,7 +165,25 @@ class DerivativeMistake(MalRule):
         if cur.kind != "expr":
             return None
         if isinstance(prev.node, A.Deriv):
-            return diagnose_derivative(prev.node.operand, prev.node.var, cur.value)
-        if prev.label.startswith("d/d") and len(prev.label) == 4:    # set by the checker for [d/dx] steps
-            return diagnose_derivative(prev.node, prev.label[3], cur.value)
-        return None
+            f, var = prev.node.operand, prev.node.var
+        elif prev.label.startswith("d/d") and len(prev.label) == 4:    # set by the checker for [d/dx] steps
+            f, var = prev.node, prev.label[3]
+        else:
+            return None
+        return diagnose_derivative(f, var, cur.value) or wrong_variable(f, var, cur.value)
+
+
+def wrong_variable(f_node, var, claimed):
+    """d/dx(t³) -> 3t²: differentiated with respect to another letter."""
+    f = to_sympy(f_node)
+    for other in sorted(f.free_symbols, key=lambda s: s.name):
+        if other.name == var:
+            continue
+        if same_value(sp.diff(f, other), claimed) and not same_value(sp.diff(f, sp.Symbol(var)), claimed):
+            return Diagnosis(
+                "calculus.wrong_variable", "Calculus · variable of differentiation",
+                f"This differentiates with respect to {other}, not {var}",
+                f"d/d{var} treats every other letter as a constant, so {other} is held fixed here. "
+                f"The step's answer is d/d{other} instead.",
+                f"d/d{var}({A.to_text(f_node)}) = {fmt(sp.diff(f, sp.Symbol(var)))}")
+    return None

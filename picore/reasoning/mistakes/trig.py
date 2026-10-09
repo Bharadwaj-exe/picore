@@ -27,7 +27,8 @@ class DegreesVsRadians(MalRule):
         if cur.kind != "expr" or prev.node is None:
             return None
         has_trig = any(isinstance(n, A.Call) and n.func in TRIG for n in A.walk(prev.node))
-        if not has_trig or prev.value.free_symbols:
+        if not has_trig or not any(isinstance(n, A.Call) and n.func in TRIG and not to_sympy(n.args[0]).free_symbols
+                                   for n in A.walk(prev.node)):        # needs a numeric angle like sin(30)
             return None
         as_degrees = sp.nsimplify(sp.simplify(to_sympy(_in_degrees(prev.node))))
         if same_value(as_degrees, cur.value) and not same_value(prev.value, cur.value):
