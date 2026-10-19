@@ -12,15 +12,22 @@ import os
 from .paths import app_root, user_data_dir
 
 DEFAULTS = {"music_on": True, "wolfram_app_id": "", "wolfram_proxy_url": ""}
+TYPES = {"music_on": bool, "wolfram_app_id": str, "wolfram_proxy_url": str}
+MAX_CONFIG_BYTES = 64_000
 
 
 def _read(path):
+    """A config file's known keys with the right types; anything else is ignored (never fatal)."""
     try:
+        if os.path.getsize(path) > MAX_CONFIG_BYTES:
+            return {}
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
-        return data if isinstance(data, dict) else {}
     except (OSError, ValueError):
         return {}
+    if not isinstance(data, dict):
+        return {}
+    return {k: v for k, v in data.items() if k in TYPES and isinstance(v, TYPES[k])}
 
 
 class Settings:
