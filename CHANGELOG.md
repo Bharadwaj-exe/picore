@@ -1,5 +1,72 @@
 # Changelog
 
+## 0.5.0: hardening, validation and release
+
+This release adds no headline feature. It makes the existing ones defensible.
+
+**Mistake Detective**
+- Evaluation benchmark: 230 labelled single steps covering algebra, equations, calculus, trig and
+  domains (`tests/data/detective_corpus.json`, `tools/evaluate_detective.py`, `docs/EVALUATION.md`).
+  The test suite enforces zero false positives on correct work, zero misattributed or invented
+  diagnoses, and recall ≥ 97%. Current results: 0/107 false positives, 115/117 recall, 87/87
+  misconceptions named exactly.
+- Fixed false positives on correct work. Steps such as `2sin x = 1 → sin x = 1/2` and
+  `e^x = x + 2 → x = ln(x + 2)` were flagged because SymPy returned unevaluated solution sets.
+- Fixed false acceptances:
+  - `(x²−1)/(x−1) = 2 → x + 1 = 2`: proportional residuals that ignore an excluded point
+  - `ln(x²) → 2ln x`: a rewrite that loses part of the domain
+- New verdict: "numerically supported", for steps that agree at test points but are not proved.
+- Rounded answers (`x = cos x → x = 0.739`) are reported as "couldn't check", not as mistakes.
+- New rules:
+  - `log` read as base 10
+  - a constant factor dropped in a derivative
+  - differentiating with respect to the wrong variable
+  - a fraction split over its denominator
+  - one side divided by a constant
+  - the domain lost by a rewrite
+  - an antiderivative valid on only part of the domain
+- Rule fixes:
+  - The square-root rule no longer makes a false claim, and only fires on polynomial equations.
+  - Rules that raise an error no longer crash a check; the error is logged instead.
+
+**Mathematics**
+- Periodic equations give every real solution as a family, e.g. x = 2πn + π/6.
+- Identities say every value is a solution.
+- Inconsistent polynomial systems are proved to have no solutions.
+- Undefined values (`1/0`, `ln 0`, `(−3)!`) are reported as undefined. Divergent integrals are
+  reported as not converging.
+- New shared real-root finder. Sign changes are refined by bisection, poles are rejected, and
+  roots without a sign change (such as `e^x = x + 1` at 0) are found. It never claims to be complete.
+- Constants are compared at 60 digits, so `e^(π√163)` is no longer treated as equal to
+  `640320³ + 744`. Numerical sampling uses real values only.
+- `d/dx` treats the variable as real: `d/dx |x| = sign x`, instead of a 16-second complex-analysis
+  result.
+
+**Robustness and security**
+- Size limits stop inputs that used to run for minutes:
+  - integer powers of symbolic expressions: at most 200
+  - a whole query: at most 2000 characters
+  - a `check` chain: at most 12 steps
+- Only input that looks like a word question is sent to Wolfram|Alpha. Malformed maths is
+  explained locally.
+- Wolfram responses are validated for structure and size.
+- A damaged history database is moved aside instead of crashing the app at startup.
+- Config values are type-checked.
+- Rotating log file (`picore.log`) records internal errors with tracebacks.
+- Property tests: random syntax trees print and re-parse identically, and node spans nest. These
+  found and fixed two printer bugs.
+
+**Architecture**
+- The printing and text-parsing helpers moved into `picore/lang`. Lower layers no longer import
+  from the engine layer.
+- The checker exposes `judge_step()` with rule ids for the benchmark.
+
+**Repository**
+- `.coverage` is no longer tracked.
+- The background music (licence unknown) is no longer in the repository; the app runs silently
+  without it.
+- Tests: 340, line coverage 87%.
+
 ## 0.4.0: reasoning environment
 
 πCore now reasons about maths instead of only computing it.

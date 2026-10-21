@@ -1,4 +1,5 @@
 """πCore application: one window, one process, scene-based."""
+import logging
 import os
 import warnings
 
@@ -25,8 +26,8 @@ class Music:
             pygame.mixer.music.set_volume(0.6)
             pygame.mixer.music.play(-1)
             self.available = True
-        except pygame.error:
-            return  # no audio device or file: run silently
+        except (pygame.error, OSError):
+            return  # no audio device or no music file (it is optional): run silently
         if not self.on:
             pygame.mixer.music.pause()
 
@@ -46,6 +47,9 @@ class Music:
 
 class App:
     def __init__(self):
+        from . import __version__, logs
+        log_file = logs.setup(paths.user_data_dir())
+        logging.getLogger("picore").info("πCore %s starting (log: %s)", __version__, log_file)
         pygame.init()
         self.screen = pygame.display.set_mode((T.WIDTH, T.HEIGHT), pygame.RESIZABLE | pygame.SCALED)
         pygame.display.set_caption("πCore")
@@ -131,7 +135,7 @@ def selftest(out_path):
         "tree": A.to_text(parse("2sin(x)^2 + 3x")),
         "explore": analyze(exp).kind,
         "assets": all(os.path.exists(paths.asset(f)) for f in
-                      ("background1.png", "background2.png", "picore_logo.png", "bgmusic.mp3")),
+                      ("background1.png", "background2.png", "picore_logo.png")),   # music is optional
         "storage": History(paths.user_data_dir() / "history.db").fetch(1) is not None,
     }
     with open(out_path, "w", encoding="utf-8") as f:

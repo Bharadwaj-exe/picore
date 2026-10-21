@@ -16,3 +16,6 @@ assets/fonts/ShotengaiDemo.otf
 .coverage
 .coverage.*
 htmlcov/
+
+# background music: licence unknown, kept local only (the app runs silently without it)
+assets/*.mp3

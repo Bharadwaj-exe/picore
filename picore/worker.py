@@ -1,7 +1,10 @@
 """Run slow work (math, network) off the render loop."""
+import logging
 import queue
 import threading
 import time
+
+log = logging.getLogger(__name__)
 
 
 class Worker:
@@ -25,6 +28,7 @@ class Worker:
             try:
                 result, error = fn(*args), None
             except Exception as exc:  # surfaced to the UI, never crashes the app
+                log.exception("background job %r failed", kind)
                 result, error = None, exc
             self._done.put((kind, job_id, result, error))
 

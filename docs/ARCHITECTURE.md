@@ -33,6 +33,52 @@ someone's working. This document explains how the pieces fit and how to extend t
                    Pygame (one window, one process)
 ```
 
+## Diagrams
+
+**System architecture**
+
+```mermaid
+flowchart TD
+    A[Input text] --> B[Lexer<br/>positioned tokens]
+    B --> C[Recursive-descent parser]
+    C --> D[AST with source spans]
+    D --> E[Domain analysis<br/>denominators, logs, roots, poles]
+    D --> F[SymPy backend]
+    E --> G[Reasoning<br/>equivalence · mal-rules · derivations]
+    F --> G
+    G --> H[Verification<br/>symbolic proof · numerical evidence]
+    H --> I[Presentation<br/>result cards · graph · tree · explorer · history]
+```
+
+**Mistake Detective**
+
+```mermaid
+flowchart TD
+    P[Previous step] --> J{Is the student step valid?<br/>equivalence / solution sets}
+    S[Student step] --> J
+    J -- valid --> OK[correct · numerically supported]
+    J -- undecidable --> U[couldn't check]
+    J -- invalid --> R[Rule registry<br/>mal-rules in order]
+    R --> C[Candidate wrong steps<br/>mal-rule applied to the previous step]
+    C --> M{Reproduces the<br/>student step?}
+    M -- yes --> D[Diagnosis: misconception,<br/>why it is wrong, correct step]
+    M -- no rule matches --> E[Mistake with evidence only<br/>counterexample / lost or gained roots]
+```
+
+**Calculation flow**
+
+```mermaid
+flowchart TD
+    U[User input] --> P[Parser]
+    P -- parsed --> L[Local engine: SymPy]
+    L -- success --> R[Result cards + verification]
+    L -- SymPy cannot finish --> W{Wolfram AppID<br/>or proxy set?}
+    P -- looks like words --> W
+    P -- malformed maths / too large --> X[Explained locally, never sent online]
+    W -- yes --> WA[Wolfram|Alpha]
+    W -- no --> O[Offline message]
+```
+
 ## Layers
 
 | Package | Responsibility | Depends on |
@@ -40,10 +86,10 @@ someone's working. This document explains how the pieces fit and how to extend t
 | `picore/lang` | Turn text into a structured, positioned AST. Grammar: [GRAMMAR.md](GRAMMAR.md). | nothing (the SymPy backend module is the only exception) |
 | `picore/reasoning` | Decide equivalence, verify results, diagnose mistakes, run derivations. | `lang`, SymPy |
 | `picore/engine` | Route a query to a command and return result cards (`Response`). Wolfram is used only for input the local engine can't parse. | `lang`, `reasoning` |
-| `picore/explore.py` | Parameter experiments and analyzers (no UI). | `engine.parser`, SymPy, NumPy |
+| `picore/explore.py` | Parameter experiments and analyzers (no UI). | `lang`, `reasoning.numeric`, SymPy |
 | `picore/scenes`, `picore/ui` | Pygame screens and widgets. | everything above |
 | `picore/worker.py` | Runs slow work off the render loop. The latest job wins, and errors become results. | stdlib |
-| `picore/storage.py`, `config.py`, `paths.py` | SQLite history, settings and secrets, asset paths (work when frozen). | stdlib |
+| `picore/storage.py`, `config.py`, `paths.py`, `logs.py` | SQLite history (survives a damaged file), type-checked settings and secrets, asset paths (work when frozen), rotating error log. | stdlib |
 
 Only the `scenes`/`ui` layer imports pygame. Everything below it is plain Python, and that's
 why it is all unit-tested directly.
@@ -110,8 +156,12 @@ check  A -> B -> [rule] C -> …
 
 for each consecutive pair (prev, cur):
     labelled step?  → derivation.TRANSFORMS[rule].verify(prev, cur)
-    expressions?    → equivalence.compare(prev, cur)        exact / conditional / … / not
-    equations?      → solution sets compared, domain-aware (lost / gained roots)
+    expressions?    → equivalence.compare(prev, cur)        exact / conditional / numeric / not / unknown
+                      (a rewrite is valid if it equals prev wherever prev is defined; a result
+                       undefined somewhere prev was defined is a mistake: ln(x²) → 2 ln x)
+    equations?      → 1. proportional residuals, only if neither side excludes extra points
+                      2. exact solution sets (or their finite difference), domain-aware
+                      3. otherwise real roots compared numerically ("numerically supported")
     if invalid:
         for rule in mistakes.RULES:            (specific misconceptions first)
             if rule.detect(prev, cur): report it: category, violated rule, correct step
@@ -126,6 +176,13 @@ the diagnosis. Calculus works the same way: `calculus.differentiate` is a small 
 differentiator that can apply one wrong rule at one node, so it enumerates every derivative
 reachable by a single mistake. The full catalogue is in [MISTAKES.md](MISTAKES.md).
 
+Every step ends in one of five verdicts: **correct**, **numerically supported**, **check needed**
+(valid with care, e.g. squaring), **mistake here**, **couldn't check**. Rule failures never crash a
+check: a rule that raises is treated as not applying and the error is logged.
+
+How well this works is measured on a 230-case labelled corpus: see [EVALUATION.md](EVALUATION.md).
+The test suite fails if a correct step is ever flagged or a misconception is misattributed.
+
 ## Extension points
 
 | To add… | Do this | Nothing else changes |
@@ -138,8 +195,8 @@ reachable by a single mistake. The full catalogue is in [MISTAKES.md](MISTAKES.m
 
 ## Testing
 
-`python -m pytest`. The suite has 200+ tests, runs in about 20 seconds, and covers about 86% of
-lines. It runs on Windows and Linux in GitHub Actions.
+`python -m pytest`. The suite has 340 tests, runs in about 1–2 minutes, and covers 87% of lines.
+It runs on Windows and Linux in GitHub Actions.
 
 | File | Covers |
 |---|---|
@@ -151,6 +208,10 @@ lines. It runs on Windows and Linux in GitHub Actions.
 | `test_scenes.py` | every screen driven headlessly with real keyboard and mouse events |
 | `test_worker.py` | concurrency guarantees, plus a performance budget for the detective |
 | `test_storage.py`, `test_wolfram.py` | SQLite history; the Wolfram client against a fake proxy |
+| `test_math_regression.py` | algebra, equations (repeated, complex, periodic, unsolvable), calculus, limits, domains, equivalence |
+| `test_robustness.py` | property tests on random syntax trees, pathological and code-injection input, time bounds |
+| `test_detective_corpus.py` | the Mistake Detective benchmark and its guarantees |
+| `test_docs.py` | the rule catalogue and grammar docs match the code |
 
 ## Known limitations
 
@@ -161,4 +222,6 @@ lines. It runs on Windows and Linux in GitHub Actions.
   domain rules.
 - **Integration:** there is no `∫` syntax inside `check` steps yet. Use the `[integrate]` label,
   which also detects a missing `+ C`.
-- **Numerical root scans** cover [−20, 20] only, and say so.
+- **Numerical root scans** cover [−20, 20] only, can miss roots closer than the 0.01 grid, and say so.
+- **Threads cannot be killed:** a computation past the 25 s timeout is abandoned (its result is
+  discarded) but keeps using CPU until it ends. Input size limits keep this rare.

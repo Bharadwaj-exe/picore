@@ -5,7 +5,9 @@
 import os
 
 ROOT = os.path.abspath(os.path.join(SPECPATH, ".."))
-ASSETS = ["background1.png", "background2.png", "picore_logo.png", "bgmusic.mp3"]
+ASSETS = ["background1.png", "background2.png", "picore_logo.png"]
+# Music is optional and not in the repository (licence unknown): bundled only if you add it yourself.
+ASSETS += [f for f in ("bgmusic.mp3",) if os.path.exists(os.path.join(ROOT, "assets", f))]
 # Freely licensed fonts (SIL OFL) always ship. The Shotengai demo font is personal-use only, so it
 # is bundled only for your own builds:  set PICORE_PERSONAL_BUILD=1  before building.
 FONTS = ["ShipporiMincho-Regular.ttf", "ShipporiMincho-Bold.ttf", "YujiSyuku-Regular.ttf",

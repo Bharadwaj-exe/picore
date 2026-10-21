@@ -26,15 +26,32 @@ check x^2-5x+6=0 -> x^2 = 5x-6 -> x = 5 ± √6
 ```
 
 * Step 2 is **correct**: it's an equivalent equation.
-* Step 3 is a **mistake**: you can't square-root while the other side still contains x.
-  Correct: x² − 5x + 6 = 0 → (x − 2)(x − 3) = 0 → x = 2 or x = 3.
+* Step 3 is a **mistake**: square-rooting only gives x = ±√(5x − 6), which still contains x, and
+  5 ± √6 are not solutions. Correct: x² − 5x + 6 = 0 → (x − 2)(x − 3) = 0 → x = 2 or x = 3.
+
+Every step gets one of five verdicts: **correct** (verified symbolically), **numerically supported**
+(agrees at every test point but not proved), **check needed** (valid only with care, such as
+squaring both sides), **mistake here**, or **couldn't check**. A correct step is never called a
+mistake on a guess.
 
 πCore knows a catalogue of common misconceptions ("mal-rules") and only names one when
 re-applying it to your previous step reproduces exactly what you wrote. That covers wrong
 expansions, distribution and sign errors, invalid cancellation, exponent and log rules, terms
 moved without changing sign, dividing by something that can be zero, ± roots, extraneous roots
-from squaring, and power, product, quotient and chain rule slips. See the
-[full catalogue](docs/MISTAKES.md).
+from squaring, steps that lose part of the domain, and power, product, quotient and chain rule
+slips. See the [full catalogue](docs/MISTAKES.md).
+
+**Measured, not claimed.** A benchmark of 230 labelled steps ([docs/EVALUATION.md](docs/EVALUATION.md))
+runs as part of the test suite:
+
+| | |
+|---|---|
+| Correct steps flagged as mistakes | **0 of 107** |
+| Wrong steps flagged | 115 of 117 (98.3%) |
+| Expected misconception named | 87 of 87 |
+| Wrong misconception named, or a cause invented | **0** |
+
+It is an internal regression benchmark written for this project, not a study of real students.
 
 You can label steps with the rule you used, and πCore checks that the rule really gives that result:
 
@@ -61,7 +78,9 @@ numerical quadrature, and solutions by substituting them back. `derive (x+1)^2 :
 sub x=1` produces a chain in which every step carries its verification status.
 
 When an equation has no closed-form solution (`x^5 − x − 1 = 0`, `sin x = x/2`), πCore gives
-numerical roots and says why. It never claims "no solutions" unless that is proved.
+numerical roots and says why. Periodic equations get every solution as a family
+(`sin x = 1/2` → x = 2πn + π/6 or x = 2πn + 5π/6). It never claims "no solutions" unless that is
+proved, and undefined values (`1/0`, `ln 0`) are reported as undefined.
 
 ### 4. See how it reads your maths: the expression tree
 
@@ -142,10 +161,39 @@ and self-tests the exe. If [Inno Setup 6](https://jrsoftware.org/isinfo.php) is 
 For a public release, deploy the proxy in [`proxy/`](proxy/README.md) and set `wolfram_proxy_url`,
 so the AppID stays on the server.
 
-## Data
+## Data and logs
 
-History is stored in SQLite at `<user data folder>/history.db`, and settings (music on/off) in
-`config.json` in the same folder. No database server is needed.
+History is stored in SQLite at `<user data folder>/history.db` (`%APPDATA%\PiCore` on Windows), and
+settings (music on/off) in `config.json` in the same folder. No database server is needed. If the
+history file is ever damaged, it is moved aside and a fresh one is started; the app keeps running.
+
+Internal errors are written with tracebacks to `picore.log` in the same folder (rotated, at most
+about 1.5 MB). Nothing secret is logged.
+
+Background music is optional and not included in the repository. Put a track you have the rights
+to at `assets/bgmusic.mp3` and the app plays it; without it, the app runs silently.
+
+## Conventions and limitations
+
+* `log` means the natural logarithm (use `log10` for base 10). Angles are in radians. Equations
+  are solved over the reals and complex numbers. Under `d/dx`, other letters are constants.
+* Numerical root search covers [−20, 20] and can miss roots closer together than 0.01. Results
+  from it are always labelled as numerical.
+* The Mistake Detective models one misconception per step. Multi-variable equations are only
+  checked for simple rearrangements, and otherwise reported as "couldn't check".
+* Integer powers of symbolic expressions are limited to 200, and inputs to 300 characters per
+  expression, so that no input can hang the app.
+* Background jobs have a 25 s timeout. Python cannot stop a thread, so a runaway computation
+  keeps using CPU until it finishes, but its result is discarded.
+
+## Security
+
+* Maths input is parsed by Pi Core's own grammar. It never reaches `eval`/`exec`, and code-like
+  input is tested to never run (`tests/test_robustness.py`).
+* The Wolfram|Alpha AppID is read from the environment or a git-ignored config file. It is never
+  in the source, the git history or the built `.exe` (the build script checks for this). For
+  public builds, use the [proxy](proxy/README.md) so the key stays on a server.
+* Responses from Wolfram|Alpha are treated as untrusted: their structure and size are validated.
 
 ## Project layout
 
@@ -161,8 +209,9 @@ picore/
   ui/                 theme, fonts, widgets, reusable plot
   app.py worker.py storage.py config.py paths.py
 assets/               backgrounds, logo, music, fonts
-docs/                 ARCHITECTURE, GRAMMAR, MISTAKES, screenshots
-tests/                pytest suite (200+ tests)
+docs/                 ARCHITECTURE, GRAMMAR, MISTAKES, EVALUATION, PORTFOLIO, screenshots
+tests/                pytest suite (340 tests) + data/detective_corpus.json
+tools/                evaluate_detective.py (the benchmark)
 packaging/            PyInstaller spec, Inno Setup script, build.ps1
 proxy/                Cloudflare Worker that hides the Wolfram AppID
 ```
