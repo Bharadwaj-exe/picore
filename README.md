@@ -12,7 +12,7 @@ Terminate".
 
 ```bash
 pip install -r requirements.txt
-python "Pi Core.py"
+python -m picore        # or: python main.py
 ```
 
 ## What makes it different
@@ -140,7 +140,7 @@ but only if an AppID is configured. Set it with any one of these:
 
 1. Environment variable `PICORE_WOLFRAM_APPID`
 2. `config.json` in the user data folder (`%APPDATA%\PiCore` on Windows): `{"wolfram_app_id": "…"}`
-3. `picore.config.json` next to `Pi Core.py` (git-ignored, for development)
+3. `picore.config.json` next to `main.py` (git-ignored, for development)
 
 Or use a proxy instead of an AppID: `PICORE_WOLFRAM_PROXY` / `"wolfram_proxy_url"` (see [proxy/](proxy/README.md)).
 
@@ -198,7 +198,7 @@ to at `assets/bgmusic.mp3` and the app plays it; without it, the app runs silent
 ## Project layout
 
 ```
-Pi Core.py            entry point
+main.py               entry point (also: python -m picore)
 picore/
   lang/               lexer, recursive-descent parser, AST, SymPy backend, domain analysis
   reasoning/          equivalence, numerical verification, derivations
@@ -209,7 +209,8 @@ picore/
   ui/                 theme, fonts, widgets, reusable plot
   app.py worker.py storage.py config.py paths.py
 assets/               backgrounds, logo, music, fonts
-docs/                 ARCHITECTURE, GRAMMAR, MISTAKES, EVALUATION, PORTFOLIO, screenshots
+docs/                 ARCHITECTURE, GRAMMAR, MISTAKES, EVALUATION, PORTFOLIO, screenshots,
+                      original-school-synopsis.docx (where the project started)
 tests/                pytest suite (340 tests) + data/detective_corpus.json
 tools/                evaluate_detective.py (the benchmark)
 packaging/            PyInstaller spec, Inno Setup script, build.ps1
