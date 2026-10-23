@@ -16,7 +16,7 @@ if os.environ.get("PICORE_PERSONAL_BUILD") == "1":
     FONTS.append("ShotengaiDemo.otf")
 
 a = Analysis(
-    [os.path.join(ROOT, "Pi Core.py")],
+    [os.path.join(ROOT, "main.py")],
     pathex=[ROOT],
     datas=[(os.path.join(ROOT, "assets", f), "assets") for f in ASSETS]
           + [(os.path.join(ROOT, "assets", "fonts", f), "assets/fonts") for f in FONTS],
